@@ -1,0 +1,66 @@
+name: Build Unsigned IPA
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build raw unsigned IPA (SideStore/AltStore)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen || true
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (no signing)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ClipboardHistory.xcodeproj \
+            -scheme ClipboardHistory \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            build
+
+      - name: Assemble raw unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          echo "APP_PATH=$APP_PATH"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          # 不写 embedded.mobileprovision，不运行 codesign
+          zip -qr -X ClipboardHistory-2.0.0-unsigned.ipa Payload
+          unzip -l ClipboardHistory-2.0.0-unsigned.ipa | head -40
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipboardHistory-2.0.0-unsigned-ipa
+          path: ClipboardHistory-2.0.0-unsigned.ipa
+          retention-days: 30
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ClipboardHistory-2.0.0-unsigned.ipa
+          generate_release_notes: true

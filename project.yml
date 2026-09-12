@@ -1,0 +1,103 @@
+name: ClipboardHistory
+options:
+  bundleIdPrefix: com.clipboard
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: bottom
+  generateEmptyDirectories: true
+  developmentLanguage: zh-Hans
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "2"
+    CODE_SIGN_STYLE: Automatic
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_BITCODE: NO
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    GCC_TREAT_WARNINGS_AS_ERRORS: NO
+    # macOS Catalyst（v2.0：支持 Mac）
+    SUPPORTS_MACCATALYST: YES
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+
+targets:
+  ClipboardHistory:
+    type: application
+    platform: iOS
+    sources:
+      - path: ClipboardHistory
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clipboard.history
+        INFOPLIST_FILE: ClipboardHistory/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClipboardHistory/ClipboardHistory.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator maccatalyst"
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: YES
+        ENABLE_PREVIEWS: YES
+    dependencies:
+      - target: ClipKit
+      - target: ClipboardKeyboard
+      - target: ClipboardWidget
+      - sdk: BackgroundTasks.framework
+      - sdk: CloudKit.framework
+      - sdk: AppIntents.framework
+      - sdk: SQLite3.tbd
+
+  ClipboardKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ClipboardKeyboard
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clipboard.history.keyboard
+        INFOPLIST_FILE: ClipboardKeyboard/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClipboardKeyboard/ClipboardKeyboard.entitlements
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator maccatalyst"
+    dependencies:
+      - target: ClipKit
+
+  ClipboardWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ClipboardWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clipboard.history.widget
+        INFOPLIST_FILE: ClipboardWidget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClipboardWidget/ClipboardWidget.entitlements
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator maccatalyst"
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+
+  ClipKit:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ClipKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clipboard.kit
+        INFOPLIST_FILE: ClipKit/Info.plist
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator maccatalyst"
+        DEFINES_MODULE: YES
+    dependencies:
+      - sdk: SQLite3.tbd
+      - sdk: CloudKit.framework
+      - sdk: BackgroundTasks.framework
+      - sdk: Security.framework
+      - sdk: CommonCrypto.tbd
