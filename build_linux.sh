@@ -1,200 +1,174 @@
 #!/bin/bash
 # ============================================================================
-# ClipboardHistory —— Ubuntu/Linux 交叉编译，产出「未签名裸 raw.ipa」
+# ClipboardHistory v2.0 —— Ubuntu/Linux 交叉编译，产出「未签名裸 raw.ipa」
 # ----------------------------------------------------------------------------
-# 流程：
-#   swiftc/clang (host=linux, target=arm64-apple-ios16.0)
-#     -> arm64 Mach-O 未签名二进制
-#     -> 手动搭建 Payload/ClipboardHistory.app（Frameworks / PlugIns）
-#     -> 放入二进制 + Info.plist + PkgInfo（不写 mobileprovision、不调用任何签名工具）
-#     -> zip -r 得到 raw.ipa
-#   设备端由 SideStore / AltStore 在本地完成全部签名与安装。
+# host=linux  target=arm64-apple-ios16.0
+#   swiftc/clang 交叉编译 + ld64.lld 链接 -> arm64 Mach-O（不运行任何签名工具）
+#   手动搭建 Payload/ClipboardHistory.app（Frameworks / PlugIns / 图标 / plist）
+#   zip 得到 raw ipa；设备端由 SideStore / AltStore 本地完成签名安装。
 #
-# 依赖：
-#   1. Swift for Linux（含 clang、ld64.lld），建议 5.8.x（与 SDK 构建版本一致）
-#        https://www.swift.org/download/
-#   2. iPhoneOS SDK（从 Xcode 抽取，或 https://github.com/xybp888/iOS-SDKs）
+# 已验证的关键修复（缺一不可）：
+#   1) resource-dir 必须用【绝对路径】，并删除其中与 iOS SDK 冲突的 Linux 模块
+#   2) 补 Dispatch.apinotes / os.apinotes（把 OS_dispatch_queue 映射为 DispatchQueue）
+#   3) SDK 内 .swiftinterface 的编译器版本行需改写为与本工具链一致
+#   4) SDK 内 dispatch/os module.modulemap 去掉 [extern_c]（让 ObjC 类可见）
+#   5) 用名为 ld 的包装脚本转调 ld64.lld（GNU ld 不认 -dynamic）
+#   6) 链接显式传 -platform_version ios 16.0.0 16.4
+#   7) -Xcc -fmodules-cache-path=PATH 必须是单参数（= 形式）
 #
 # 用法：
 #   SWIFT_TOOLCHAIN=/path/to/swift/usr IOS_SDK=/path/to/iPhoneOS.sdk ./build_linux.sh
 # ============================================================================
 set -euo pipefail
 
-# ---------- 0. 参数 ----------
 APP_NAME="ClipboardHistory"
-DEPLOY="16.0"
+DEPLOY="16.0"; SDK_VER="16.4"
 TARGET="arm64-apple-ios${DEPLOY}"
-BUILD_DIR="build-linux"
-PAYLOAD="${BUILD_DIR}/Payload/${APP_NAME}.app"
-OUT_IPA="build-linux/ClipboardHistory-raw-unsigned.ipa"
+MARK_VER="2.0.0"; CUR_VER="2"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+BUILD="${ROOT}/build-linux"
+APP="${BUILD}/Payload/${APP_NAME}.app"
+OUT_IPA="${BUILD}/ClipboardHistory-${MARK_VER}-raw-unsigned.ipa"
 
-SWIFT_TOOLCHAIN="${SWIFT_TOOLCHAIN:-${SWIFT_ROOT:-}}"
-IOS_SDK="${IOS_SDK:-${SDK:-}}"
-
-# 自动探测常见位置
-if [[ -z "${SWIFT_TOOLCHAIN}" ]]; then
-  for c in /tmp/swift-*/usr /usr/share/swift/usr /opt/swift/usr; do
-    [[ -x "$c/bin/swiftc" ]] && SWIFT_TOOLCHAIN="$c" && break
-  done
-fi
-if [[ -z "${IOS_SDK}" ]]; then
-  for s in /tmp/ios-sdks/iPhoneOS*.sdk /opt/iPhoneOS*.sdk; do
-    [[ -d "$s" ]] && IOS_SDK="$s" && break
-  done
-fi
-
-SWIFTC="${SWIFT_TOOLCHAIN}/bin/swiftc"
-CLANG="${SWIFT_TOOLCHAIN}/bin/clang"
-LD64="${SWIFT_TOOLCHAIN}/bin/ld64.lld"
-
-echo "================================================"
-echo " ClipboardHistory Linux 交叉编译 (未签名裸 IPA)"
-echo "  toolchain : ${SWIFT_TOOLCHAIN:-未找到}"
-echo "  sdk       : ${IOS_SDK:-未找到}"
-echo "  target    : ${TARGET}"
-echo "================================================"
-
-[[ -x "${SWIFTC}" ]] || { echo "❌ 未找到 swiftc，请设置 SWIFT_TOOLCHAIN"; exit 1; }
-[[ -d "${IOS_SDK}" ]]  || { echo "❌ 未找到 iPhoneOS SDK，请设置 IOS_SDK"; exit 1; }
-
-# 自定义 resource-dir（规避 Linux 平台模块与 iOS SDK 冲突）
-RES_DIR="${BUILD_DIR}/resource-dir"
-rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}/obj" "${PAYLOAD}/Frameworks" "${PAYLOAD}/PlugIns"
-rm -rf "${RES_DIR}"; cp -r "${SWIFT_TOOLCHAIN}/lib/swift" "${RES_DIR}"
-# 删除与 iOS SDK 冲突的 Linux 原生模块
-rm -rf "${RES_DIR}/dispatch" "${RES_DIR}/os" "${RES_DIR}/CoreFoundation" \
-       "${RES_DIR}/Block" "${RES_DIR}/linux" 2>/dev/null || true
-# clang 内置头
-CLANG_VER="$(ls "${SWIFT_TOOLCHAIN}/lib/clang" 2>/dev/null | head -1)"
-[[ -n "${CLANG_VER}" && -d "${SWIFT_TOOLCHAIN}/lib/clang/${CLANG_VER}" ]] && \
-  rm -rf "${RES_DIR}/clang" && cp -r "${SWIFT_TOOLCHAIN}/lib/clang/${CLANG_VER}" "${RES_DIR}/clang" || true
-
-COMMON_FLAGS=(
-  -target "${TARGET}"
-  -sdk "${IOS_SDK}"
-  -resource-dir "${RES_DIR}"
-  -O
-  -parse-as-library
-)
-
-# ============================================================================
-# 1. 编译 ClipKit.framework
-# ============================================================================
-echo "[1/5] 编译 ClipKit.framework ..."
-mapfile -t CLIPKIT_SRC < <(find ClipKit -name "*.swift" | sort)
-mkdir -p "${PAYLOAD}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule"
-
-"${SWIFTC}" "${COMMON_FLAGS[@]}" \
-  -module-name ClipKit \
-  -emit-module \
-  -emit-library \
-  -emit-module-path "${PAYLOAD}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule/arm64-apple-ios.swiftmodule" \
-  -o "${PAYLOAD}/Frameworks/ClipKit.framework/ClipKit" \
-  -Xlinker -install_name -Xlinker @rpath/ClipKit.framework/ClipKit \
-  "${CLIPKIT_SRC[@]}" || {
-    echo "⚠️  ClipKit 编译失败。已知问题：Linux swiftc 与抽取版 iOS SDK 的 Dispatch overlay"
-    echo "    可能存在模块桥接差异。请使用与 SDK 同版本的 Swift，或改用 GitHub Actions(macOS) 构建。"
-    exit 2
-  }
-cp ClipKit/Info.plist "${PAYLOAD}/Frameworks/ClipKit.framework/Info.plist"
-
-# ============================================================================
-# 2. 编译主 App
-# ============================================================================
-echo "[2/5] 编译主 App ..."
-mapfile -t APP_SRC < <(find ClipboardHistory -name "*.swift" | sort)
-"${SWIFTC}" "${COMMON_FLAGS[@]}" \
-  -module-name ClipboardHistory \
-  -F "${PAYLOAD}/Frameworks" \
-  -I "${PAYLOAD}/Frameworks/ClipKit.framework/Modules" \
-  -emit-executable \
-  -Xlinker -rpath -Xlinker @executable_path/Frameworks \
-  -o "${PAYLOAD}/${APP_NAME}" \
-  "${APP_SRC[@]}"
-
-# ============================================================================
-# 3. 编译键盘扩展
-# ============================================================================
-echo "[3/5] 编译键盘扩展 ..."
-KB_DIR="${PAYLOAD}/PlugIns/ClipboardKeyboard.appex"
-mkdir -p "${KB_DIR}"
-"${SWIFTC}" "${COMMON_FLAGS[@]}" \
-  -module-name ClipboardKeyboard \
-  -F "${PAYLOAD}/Frameworks" \
-  -I "${PAYLOAD}/Frameworks/ClipKit.framework/Modules" \
-  -emit-library \
-  -Xlinker -rpath -Xlinker @executable_path/Frameworks \
-  -Xlinker -rpath -Xlinker @executable_path/../../Frameworks \
-  -o "${KB_DIR}/ClipboardKeyboard" \
-  ClipboardKeyboard/*.swift
-cp ClipboardKeyboard/Resources/Info.plist "${KB_DIR}/Info.plist"
-
-# ============================================================================
-# 4. 编译 Widget 扩展
-# ============================================================================
-echo "[4/5] 编译 Widget 扩展 ..."
-WG_DIR="${PAYLOAD}/PlugIns/ClipboardWidget.appex"
-mkdir -p "${WG_DIR}"
-"${SWIFTC}" "${COMMON_FLAGS[@]}" \
-  -module-name ClipboardWidget \
-  -emit-library \
-  -o "${WG_DIR}/ClipboardWidget" \
-  ClipboardWidget/*.swift
-cp ClipboardWidget/Info.plist "${WG_DIR}/Info.plist"
-
-# ============================================================================
-# 5. 组装 Bundle 资源 + 打包
-# ============================================================================
-echo "[5/5] 组装 Payload 并压缩 ..."
-# 主 Info.plist（替换构建变量）
-sed -e 's/\$(EXECUTABLE_NAME)/ClipboardHistory/g' \
-    -e 's/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.clipboard.history/g' \
-    -e 's/\$(PRODUCT_NAME)/ClipboardHistory/g' \
-    -e 's/\$(MARKETING_VERSION)/2.0.0/g' \
-    -e 's/\$(CURRENT_PROJECT_VERSION)/2/g' \
-    -e 's/\$(PRODUCT_MODULE_NAME)/ClipboardHistory/g' \
-    ClipboardHistory/Resources/Info.plist > "${PAYLOAD}/Info.plist"
-
-# PkgInfo
-printf 'APPL????' > "${PAYLOAD}/PkgInfo"
-
-# 资源（Assets 编译后的 car 在无 actool 时以目录形式保留，SideStore 不强制）
-mkdir -p "${PAYLOAD}/Assets.car.placeholder"
-
-# 扩展 Info.plist 变量替换
-sed -e 's/\$(EXECUTABLE_NAME)/ClipboardKeyboard/g' \
-    -e 's/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.clipboard.history.keyboard/g' \
-    -e 's/\$(PRODUCT_NAME)/ClipboardKeyboard/g' \
-    -e 's/\$(MARKETING_VERSION)/2.0.0/g' \
-    -e 's/\$(CURRENT_PROJECT_VERSION)/2/g' \
-    -e 's/\$(PRODUCT_MODULE_NAME)/ClipboardKeyboard/g' \
-    ClipboardKeyboard/Resources/Info.plist > "${KB_DIR}/Info.plist"
-printf 'XPC!????' > "${KB_DIR}/PkgInfo"
-
-sed -e 's/\$(EXECUTABLE_NAME)/ClipboardWidget/g' \
-    -e 's/\$(PRODUCT_BUNDLE_IDENTIFIER)/com.clipboard.history.widget/g' \
-    -e 's/\$(PRODUCT_NAME)/ClipboardWidget/g' \
-    -e 's/\$(MARKETING_VERSION)/2.0.0/g' \
-    -e 's/\$(CURRENT_PROJECT_VERSION)/2/g' \
-    ClipboardWidget/Info.plist > "${WG_DIR}/Info.plist"
-printf 'XPC!????' > "${WG_DIR}/PkgInfo"
-
-# 校验 Mach-O
-echo "--------------------------------"
-for bin in "${PAYLOAD}/${APP_NAME}" "${PAYLOAD}/Frameworks/ClipKit.framework/ClipKit" \
-           "${KB_DIR}/ClipboardKeyboard" "${WG_DIR}/ClipboardWidget"; do
-  if [[ -f "$bin" ]]; then
-    file "$bin" | sed 's/^/  /'
-  fi
+SWIFT_TOOLCHAIN="${SWIFT_TOOLCHAIN:-}"
+IOS_SDK="${IOS_SDK:-}"
+# 默认探测持久工具链目录
+for c in "$SWIFT_TOOLCHAIN" \
+         "${ROOT}/../toolchain/swift-5.8-RELEASE-ubuntu22.04/usr" \
+         /home/user/.doubao/agent_mode/workspace/toolchain/swift-5.8-RELEASE-ubuntu22.04/usr; do
+    [[ -z "$c" ]] && continue
+    if [[ -x "$c/bin/swiftc" ]]; then SWIFT_TOOLCHAIN="$c"; break; fi
 done
-echo "--------------------------------"
+for s in "$IOS_SDK" "${ROOT}/../toolchain/iPhoneOS16.4.sdk" \
+         /home/user/.doubao/agent_mode/workspace/toolchain/iPhoneOS16.4.sdk; do
+    [[ -z "$s" ]] && continue
+    if [[ -d "$s/usr/include" ]]; then IOS_SDK="$s"; break; fi
+done
+[[ -x "${SWIFT_TOOLCHAIN}/bin/swiftc" ]] || { echo "❌ 未找到 swiftc，请设置 SWIFT_TOOLCHAIN"; exit 1; }
+[[ -d "${IOS_SDK}" ]] || { echo "❌ 未找到 iOS SDK，请设置 IOS_SDK"; exit 1; }
+SWIFTC="${SWIFT_TOOLCHAIN}/bin/swiftc"
 
-# zip 打包（裸 IPA，不签名）
-cd "${BUILD_DIR}"
-rm -f "$(basename "${OUT_IPA}")"
-zip -qr -X "$(basename "${OUT_IPA}")" Payload
-cd - >/dev/null
+# ---- ld 包装：swiftc 链接时默认调 /usr/bin/ld(GNU)，需转 ld64.lld ----
+LINKBIN="${BUILD}/linkbin"; mkdir -p "$LINKBIN"
+cat > "$LINKBIN/ld" <<EOF
+#!/bin/bash
+exec "${SWIFT_TOOLCHAIN}/bin/ld64.lld" "\$@"
+EOF
+chmod +x "$LINKBIN/ld"
+export PATH="${LINKBIN}:${SWIFT_TOOLCHAIN}/bin:$PATH"
 
-echo ""
-echo "✅ 未签名裸 IPA 已生成：${OUT_IPA}"
-echo "   传到 iPhone 后由 SideStore/AltStore 在设备端签名安装。"
+# ---- resource-dir（绝对路径）----
+RES="$(mkdir -p "${BUILD}/resource-dir" && cd "${BUILD}/resource-dir" && pwd)"
+if [[ ! -f "${RES}/.prepared" ]]; then
+  rm -rf "${RES:?}"/*
+  cp -R "${SWIFT_TOOLCHAIN}/lib/swift/"*.swift "${RES}/" 2>/dev/null || true
+  cp -R "${SWIFT_TOOLCHAIN}/lib/swift/linux" "${RES}/" 2>/dev/null || true
+  # 删除与 iOS SDK 冲突的 Linux/重复模块
+  rm -rf "${RES}/dispatch" "${RES}/os" "${RES}/CoreFoundation" "${RES}/Block" "${RES}/linux" 2>/dev/null || true
+  CLANG_VER="$(ls "${SWIFT_TOOLCHAIN}/lib/clang" | head -1)"
+  mkdir -p "${RES}/clang"
+  cp -R "${SWIFT_TOOLCHAIN}/lib/clang/${CLANG_VER}/include" "${RES}/clang/" 2>/dev/null || true
+  # apinotes（OS_dispatch_* -> Dispatch* 改名映射）
+  mkdir -p "${RES}/apinotes"
+  for ap in Dispatch.apinotes os.apinotes; do
+    for cand in "${ROOT}/../toolchain/swift-apinotes/apinotes/$ap" \
+                "/home/user/.doubao/agent_mode/workspace/toolchain/swift-apinotes/apinotes/$ap"; do
+      [[ -f "$cand" ]] && cp "$cand" "${RES}/apinotes/" && break
+    done
+  done
+  touch "${RES}/.prepared"
+fi
+
+COMMON=(-target "$TARGET" -sdk "$IOS_SDK" -resource-dir "$RES" -O -parse-as-library
+        -Xcc -fmodules-cache-path="${BUILD}/mcapp")
+LINKV=(-Xlinker -platform_version -Xlinker ios -Xlinker "${DEPLOY}.0" -Xlinker "$SDK_VER")
+
+mkdir -p "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule"
+mkdir -p "${APP}/PlugIns/ClipboardKeyboard.appex" "${APP}/PlugIns/ClipboardWidget.appex"
+
+subst(){ # $1=exec/module  $2=bundleid  $3=src
+  sed -e "s/\\\$(EXECUTABLE_NAME)/$1/g" -e "s/\\\$(PRODUCT_MODULE_NAME)/$1/g" \
+      -e "s/\\\$(PRODUCT_NAME)/$1/g" -e "s/\\\$(PRODUCT_BUNDLE_IDENTIFIER)/$2/g" \
+      -e "s/\\\$(MARKETING_VERSION)/${MARK_VER}/g" -e "s/\\\$(CURRENT_PROJECT_VERSION)/${CUR_VER}/g" "$3"
+}
+
+echo "==> [1/4] ClipKit.framework"
+mapfile -t KITSRC < <(find "${ROOT}/ClipKit" -name '*.swift' | sort)
+"$SWIFTC" "${COMMON[@]}" -module-name ClipKit -emit-module -emit-library \
+  -emit-module-path "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule/arm64-apple-ios.swiftmodule" \
+  -Xlinker -install_name -Xlinker @rpath/ClipKit.framework/ClipKit "${LINKV[@]}" \
+  -o "${APP}/Frameworks/ClipKit.framework/ClipKit" "${KITSRC[@]}"
+
+echo "==> [2/4] 主 App"
+mapfile -t APPSRC < <(find "${ROOT}/ClipboardHistory" -name '*.swift' | sort)
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardHistory -emit-executable \
+  -F "${APP}/Frameworks" -I "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule" \
+  -Xlinker -rpath -Xlinker @executable_path/Frameworks "${LINKV[@]}" \
+  -o "${APP}/ClipboardHistory" "${APPSRC[@]}"
+
+echo "==> [3/4] 键盘扩展"
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardKeyboard -emit-library \
+  -F "${APP}/Frameworks" -I "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule" \
+  -Xlinker -install_name -Xlinker @rpath/ClipboardKeyboard.appex/ClipboardKeyboard \
+  -Xlinker -rpath -Xlinker @executable_path/Frameworks \
+  -Xlinker -rpath -Xlinker @executable_path/../../Frameworks "${LINKV[@]}" \
+  -o "${APP}/PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard" "${ROOT}"/ClipboardKeyboard/*.swift
+
+echo "==> [4/4] Widget 扩展"
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardWidget -emit-library \
+  -Xlinker -install_name -Xlinker @rpath/ClipboardWidget.appex/ClipboardWidget "${LINKV[@]}" \
+  -o "${APP}/PlugIns/ClipboardWidget.appex/ClipboardWidget" "${ROOT}"/ClipboardWidget/*.swift
+
+# ---- 组装 Bundle ----
+echo "==> 组装 Info.plist / PkgInfo / 图标"
+subst ClipboardHistory com.clipboard.history "${ROOT}/ClipboardHistory/Resources/Info.plist" > "${APP}/Info.plist"
+subst ClipKit com.clipboard.kit "${ROOT}/ClipKit/Info.plist" > "${APP}/Frameworks/ClipKit.framework/Info.plist"
+subst ClipboardKeyboard com.clipboard.history.keyboard "${ROOT}/ClipboardKeyboard/Resources/Info.plist" > "${APP}/PlugIns/ClipboardKeyboard.appex/Info.plist"
+subst ClipboardWidget com.clipboard.history.widget "${ROOT}/ClipboardWidget/Info.plist" > "${APP}/PlugIns/ClipboardWidget.appex/Info.plist"
+printf 'APPL????' > "${APP}/PkgInfo"
+printf 'XPC!????' > "${APP}/PlugIns/ClipboardKeyboard.appex/PkgInfo"
+printf 'XPC!????' > "${APP}/PlugIns/ClipboardWidget.appex/PkgInfo"
+
+# 生成散件图标（无 actool）
+python3 - "${APP}" "${ROOT}/ClipboardHistory/Resources/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" <<'PY'
+import sys
+from PIL import Image
+app,src=sys.argv[1],sys.argv[2]
+im=Image.open(src).convert("RGB")
+specs=[("Icon-20","@2x",40),("Icon-20","@3x",60),("Icon-20~ipad","",20),("Icon-20@2x~ipad","",40),
+("Icon-29","@2x",58),("Icon-29","@3x",87),("Icon-29~ipad","",29),("Icon-29@2x~ipad","",58),
+("Icon-40","@2x",80),("Icon-40","@3x",120),("Icon-40~ipad","",40),("Icon-40@2x~ipad","",80),
+("Icon-60","@2x",120),("Icon-60","@3x",180),("Icon-76~ipad","",76),("Icon-76@2x~ipad","",152),
+("Icon-83.5@2x~ipad","",167),("Icon-1024","",1024)]
+for base,suf,size in specs:
+    im.resize((size,size),Image.LANCZOS).save(f"{app}/{base}{suf}.png","PNG",optimize=True)
+PY
+
+# ---- Mach-O 校验 ----
+echo "==> Mach-O 校验"
+python3 - "${APP}" <<'PY'
+import struct,sys,glob,os
+app=sys.argv[1]
+bins=["ClipboardHistory","Frameworks/ClipKit.framework/ClipKit",
+"PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard","PlugIns/ClipboardWidget.appex/ClipboardWidget"]
+ok=True
+for b in bins:
+    d=open(os.path.join(app,b),'rb').read()
+    magic,cput=struct.unpack('<Ii',d[:8]);n=struct.unpack('<I',d[16:20])[0]
+    assert magic==0xfeedfacf and cput==0x0100000c, b+" 非 arm64 Mach-O64"
+    off=32;plat=None
+    for _ in range(n):
+        cmd,cs=struct.unpack('<II',d[off:off+8])
+        if cmd==0x32: plat=struct.unpack('<I',d[off+8:off+12])[0]
+        off+=cs
+    assert plat==2, b+" 平台非 iOS"
+    print(f"  ✓ {b} arm64/iOS")
+print("Mach-O 全部通过")
+PY
+
+# ---- 打包裸 IPA（不签名、无 mobileprovision、无 _CodeSignature）----
+echo "==> 打包 IPA"
+rm -f "$OUT_IPA"
+( cd "$BUILD" && zip -qr -X "ClipboardHistory-${MARK_VER}-raw-unsigned.ipa" Payload )
+echo "✅ 完成: ${OUT_IPA}"
+ls -lh "$OUT_IPA"

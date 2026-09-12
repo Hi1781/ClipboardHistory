@@ -20,7 +20,7 @@ struct CopyLatestClipIntent: AppIntent {
             return .result(dialog: "剪贴板历史为空")
         }
         PasteboardSync.shared.writeToPasteboard(latest)
-        let preview = latest.previewText.prefix(40)
+        let preview = String(latest.previewText.prefix(40))
         return .result(dialog: "已复制：\(preview)")
     }
 }

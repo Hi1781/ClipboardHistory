@@ -20,8 +20,36 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleIconFiles</key>
+	<array>
+		<string>Icon-20</string>
+		<string>Icon-29</string>
+		<string>Icon-40</string>
+		<string>Icon-60</string>
+		<string>Icon-1024</string>
+	</array>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>Icon-20</string>
+				<string>Icon-29</string>
+				<string>Icon-40</string>
+				<string>Icon-76</string>
+				<string>Icon-83.5</string>
+				<string>Icon-1024</string>
+			</array>
+		</dict>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

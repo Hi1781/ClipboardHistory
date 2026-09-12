@@ -86,15 +86,10 @@ struct ClipboardWidgetEntryView: View {
     }
 }
 
-/// 兼容 iOS16/17 的小组件背景
+/// 小组件背景（iOS16 兼容；containerBackground 为 iOS17 API，在 iOS16.4 SDK 下不可用）
 private extension View {
-    @ViewBuilder
     func widgetBackground() -> some View {
-        if #available(iOSApplicationExtension 17.0, *) {
-            self.containerBackground(for: .widget) { Color(.systemBackground) }
-        } else {
-            self.background(Color(.systemBackground))
-        }
+        self.background(Color(.systemBackground))
     }
 }
 
