@@ -1,10 +1,13 @@
 # 预编译裸 IPA（未签名）
 
-- 文件：ClipboardHistory-2.2.0-raw-unsigned.ipa
-- 大小： 532K
-- SHA-256：`3b32e865bc1741b2fd55e2299c4a68cd38be53a5d69fa5c6e0c20eded1b38761`
+- 文件：ClipboardHistory-2.3.0-raw-unsigned.ipa
+- 大小： 536K
+- SHA-256：`bae8adcf51f53d693b515778a809ce1dd5aff54910a12459fa2375ef06a5da72`
 - 架构：arm64（iPhone / iPad，最低 iOS 16）
-- 状态：**未签名、无 embedded.mobileprovision、无 _CodeSignature**，为 raw 裸包。
+- 状态：**未签名、无 embedded.mobileprovision、无 _CodeSignature**，为 raw 裸包；
+  但 4 个可执行文件已用 ldid 把 App Group entitlements 嵌入 ad-hoc 签名，
+  SideStore/AltStore 重签后会保留，主 App 与键盘扩展共享同一数据容器。
+- 若安装器报 `Could not find EOCD`，说明下载不完整，请重新下载并核对上面的 SHA-256。
 
 ## 安装方式（SideStore / AltStore 设备端自签）
 1. 把本 ipa 通过「文件」或 SideStore 的「安装 IPA」导入手机；

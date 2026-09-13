@@ -2,10 +2,10 @@
 //  KeyboardViewController.swift
 //  ClipboardKeyboard
 //
-//  自定义键盘扩展 v2.2
+//  自定义键盘扩展 v2.3
+//  - 与系统键盘等高（heightAnchor 固定，空数据也不塌陷），iPhone / iPad 自适应
 //  - 唤起即双向同步，列表直接展示历史，点按一键复制并插入
-//  - 毛玻璃原生键盘观感，适配最新 iOS 风格与 iPhone / iPad
-//  - 正常浏览/复制路径绝不跳转宿主 App；仅「未授权遮罩」可去系统设置
+//  - 毛玻璃原生键盘观感；正常浏览/复制路径绝不跳转宿主 App
 //
 
 import UIKit
@@ -13,49 +13,74 @@ import ClipKit
 
 final class KeyboardViewController: UIInputViewController {
 
-    // MARK: - 背景毛玻璃（贴合系统键盘材质）
+    // MARK: - 高度（与官方键盘等高，任何状态都不塌陷）
+
+    private var heightConstraint: NSLayoutConstraint?
+    private var currentHeight: CGFloat = 0
+
+    /// 按设备与方向给出与系统键盘一致的高度
+    private func desiredKeyboardHeight() -> CGFloat {
+        let idiom = UIDevice.current.userInterfaceIdiom
+        let size = view.window?.windowScene?.screen.bounds.size ?? UIScreen.main.bounds.size
+        let landscape = size.width > size.height
+        if idiom == .pad {
+            return landscape ? 264 : 320   // iPad 官方键盘高度
+        } else {
+            return landscape ? 204 : 291   // iPhone 竖屏 291（含候选条）
+        }
+    }
+
+    private func installKeyboardHeight() {
+        let h = desiredKeyboardHeight()
+        guard view.bounds.width > 0 else { return }
+        guard abs(h - currentHeight) > 0.5 || heightConstraint == nil else { return }
+        currentHeight = h
+        if let c = heightConstraint { c.constant = h } else {
+            let c = view.heightAnchor.constraint(equalToConstant: h)
+            c.priority = UILayoutPriority(999)
+            c.isActive = true
+            heightConstraint = c
+        }
+    }
+
+    // MARK: - 背景毛玻璃
 
     private lazy var blurView: UIVisualEffectView = {
-        let effect = UIBlurEffect(style: .systemChromeMaterial)
-        let v = UIVisualEffectView(effect: effect)
+        let v = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
         v.translatesAutoresizingMaskIntoConstraints = false
         v.contentView.backgroundColor = .clear
         return v
     }()
 
-    // MARK: - 顶部工具栏
+    // MARK: - 工具栏
 
-    private lazy var toolbar: UIView = {
-        let v = UIView()
-        v.translatesAutoresizingMaskIntoConstraints = false
-        return v
-    }()
+    private lazy var toolbar = UIView()
 
     private lazy var titleLabel: UILabel = {
-        let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "剪贴历史"
-        label.font = .systemFont(ofSize: 15, weight: .semibold)
-        label.textColor = .label
-        return label
+        let l = UILabel()
+        l.translatesAutoresizingMaskIntoConstraints = false
+        l.text = "剪贴历史"
+        l.font = .systemFont(ofSize: 15, weight: .semibold)
+        l.textColor = .label
+        return l
     }()
 
-    private func makeCapsuleButton(_ symbol: String, action: Selector) -> UIButton {
+    private func makeCapsule(_ symbol: String, _ action: Selector) -> UIButton {
         var cfg = UIButton.Configuration.gray()
         cfg.cornerStyle = .capsule
         cfg.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         cfg.buttonSize = .small
-        let btn = UIButton(configuration: cfg)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.setImage(UIImage(systemName: symbol), for: .normal)
-        btn.tintColor = .label
-        btn.addTarget(self, action: action, for: .touchUpInside)
-        return btn
+        let b = UIButton(configuration: cfg)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.setImage(UIImage(systemName: symbol), for: .normal)
+        b.tintColor = .label
+        b.addTarget(self, action: action, for: .touchUpInside)
+        return b
     }
 
-    private lazy var globeButton = makeCapsuleButton("globe", action: #selector(handleSwitchKeyboard))
-    private lazy var dismissButton = makeCapsuleButton("keyboard.chevron.compact.down", action: #selector(handleDismiss))
-    private lazy var searchButton = makeCapsuleButton("magnifyingglass", action: #selector(toggleSearch))
+    private lazy var globeButton = makeCapsule("globe", #selector(handleSwitchKeyboard))
+    private lazy var dismissButton = makeCapsule("keyboard.chevron.compact.down", #selector(handleDismiss))
+    private lazy var searchButton = makeCapsule("magnifyingglass", #selector(toggleSearch))
 
     private lazy var searchBar: UISearchTextField = {
         let tf = UISearchTextField()
@@ -63,19 +88,17 @@ final class KeyboardViewController: UIInputViewController {
         tf.placeholder = "搜索历史"
         tf.font = .systemFont(ofSize: 14)
         tf.addTarget(self, action: #selector(searchChanged), for: .editingChanged)
-        tf.isHidden = true
-        tf.alpha = 0
+        tf.isHidden = true; tf.alpha = 0
         return tf
     }()
 
     private lazy var scope: UISegmentedControl = {
-        let sc = UISegmentedControl(items: ["全部", "文本", "链接", "图片"])
-        sc.translatesAutoresizingMaskIntoConstraints = false
-        sc.selectedSegmentIndex = 0
-        sc.addTarget(self, action: #selector(scopeChanged), for: .valueChanged)
-        sc.isHidden = true
-        sc.alpha = 0
-        return sc
+        let s = UISegmentedControl(items: ["全部", "文本", "链接", "图片"])
+        s.translatesAutoresizingMaskIntoConstraints = false
+        s.selectedSegmentIndex = 0
+        s.addTarget(self, action: #selector(scopeChanged), for: .valueChanged)
+        s.isHidden = true; s.alpha = 0
+        return s
     }()
 
     // MARK: - 列表
@@ -83,31 +106,28 @@ final class KeyboardViewController: UIInputViewController {
     private lazy var tableView: UITableView = {
         let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.delegate = self
-        tv.dataSource = self
+        tv.delegate = self; tv.dataSource = self
         tv.register(KeyboardHistoryCell.self, forCellReuseIdentifier: KeyboardHistoryCell.reuseID)
-        tv.estimatedRowHeight = 60
+        tv.estimatedRowHeight = 58
         tv.rowHeight = UITableView.automaticDimension
         tv.separatorStyle = .none
         tv.backgroundColor = .clear
-        tv.contentInset = UIEdgeInsets(top: 2, left: 0, bottom: 6, right: 0)
+        tv.contentInset = UIEdgeInsets(top: 2, left: 0, bottom: 8, right: 0)
         tv.keyboardDismissMode = .none
         return tv
     }()
 
     private lazy var emptyLabel: UILabel = {
-        let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = "暂无历史记录"
-        label.textColor = .secondaryLabel
-        label.font = .systemFont(ofSize: 14)
-        label.textAlignment = .center
-        label.numberOfLines = 0
-        label.isHidden = true
-        return label
+        let l = UILabel()
+        l.translatesAutoresizingMaskIntoConstraints = false
+        l.text = "暂无历史记录\n复制内容后再次唤起键盘即可看到"
+        l.textColor = .secondaryLabel
+        l.font = .systemFont(ofSize: 14)
+        l.textAlignment = .center
+        l.numberOfLines = 0
+        return l
     }()
 
-    /// 未开启「完全访问」时的引导遮罩（唯一可能跳设置的入口，与历史列表隔离）
     private lazy var noAccessView = KeyboardAccessGuideView(openSettings: { [weak self] in
         self?.openHostSettings()
     })
@@ -116,53 +136,62 @@ final class KeyboardViewController: UIInputViewController {
 
     private var tableTopToToolbar: NSLayoutConstraint!
     private var tableTopToScope: NSLayoutConstraint!
-    private var allItems: [ClipItem] = []
+    private var storedItems: [ClipItem] = []
+    private var transientItems: [ClipItem] = []   // 共享库为空时用当前剪贴板兜底
     private var visibleItems: [ClipItem] = []
     private var keyword = ""
     private var scopeType: ClipContentType?
-    private var didLayout = false
 
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // 去掉 iPad 顶部系统撤销/重做/粘贴助理条，避免与自定义 UI 重叠
+        inputAssistantItem.leadingBarButtonGroups = []
+        inputAssistantItem.trailingBarButtonGroups = []
         setupUI()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(clipboardChanged),
+            name: UIPasteboard.changedNotification, object: nil)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        performKeyboardSync()
+        syncAndReload()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        applyKeyboardHeight()
-        reloadData()
+        installKeyboardHeight()
     }
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        applyKeyboardHeight()
+        installKeyboardHeight()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate { _ in self.installKeyboardHeight() }
     }
 
     // MARK: - Setup
 
     private func setupUI() {
         view.backgroundColor = .clear
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+
         view.addSubview(blurView)
-        blurView.contentView.addSubview(toolbar)
-        toolbar.addSubview(globeButton)
-        toolbar.addSubview(titleLabel)
-        toolbar.addSubview(searchButton)
-        toolbar.addSubview(dismissButton)
-        blurView.contentView.addSubview(searchBar)
-        blurView.contentView.addSubview(scope)
-        blurView.contentView.addSubview(tableView)
-        blurView.contentView.addSubview(emptyLabel)
+        let c = blurView.contentView
+        c.addSubview(toolbar)
+        toolbar.addSubview(globeButton); toolbar.addSubview(titleLabel)
+        toolbar.addSubview(searchButton); toolbar.addSubview(dismissButton)
+        c.addSubview(searchBar); c.addSubview(scope)
+        c.addSubview(tableView); c.addSubview(emptyLabel)
 
         noAccessView.translatesAutoresizingMaskIntoConstraints = false
         noAccessView.isHidden = true
-        blurView.contentView.addSubview(noAccessView)
+        c.addSubview(noAccessView)
 
         tableTopToToolbar = tableView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 2)
         tableTopToScope = tableView.topAnchor.constraint(equalTo: scope.bottomAnchor, constant: 6)
@@ -174,9 +203,9 @@ final class KeyboardViewController: UIInputViewController {
             blurView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             blurView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            toolbar.topAnchor.constraint(equalTo: blurView.contentView.topAnchor, constant: 4),
-            toolbar.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
+            toolbar.topAnchor.constraint(equalTo: c.topAnchor, constant: 4),
+            toolbar.leadingAnchor.constraint(equalTo: c.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: c.trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 40),
 
             globeButton.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
@@ -198,82 +227,77 @@ final class KeyboardViewController: UIInputViewController {
             searchButton.heightAnchor.constraint(equalToConstant: 32),
 
             searchBar.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 4),
-            searchBar.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
-            searchBar.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor, constant: -8),
+            searchBar.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8),
+            searchBar.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8),
             searchBar.heightAnchor.constraint(equalToConstant: 34),
 
             scope.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 6),
-            scope.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
-            scope.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor, constant: -8),
+            scope.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8),
+            scope.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8),
             scope.heightAnchor.constraint(equalToConstant: 30),
 
             tableTopToToolbar,
-            tableView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor),
+            tableView.leadingAnchor.constraint(equalTo: c.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: c.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: c.safeAreaLayoutGuide.bottomAnchor),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor, constant: 18),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: blurView.contentView.leadingAnchor, constant: 24),
-            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: blurView.contentView.trailingAnchor, constant: -24),
+            emptyLabel.centerXAnchor.constraint(equalTo: c.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: c.centerYAnchor, constant: 16),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: c.leadingAnchor, constant: 24),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: c.trailingAnchor, constant: -24),
 
             noAccessView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            noAccessView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
-            noAccessView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
-            noAccessView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor)
+            noAccessView.leadingAnchor.constraint(equalTo: c.leadingAnchor),
+            noAccessView.trailingAnchor.constraint(equalTo: c.trailingAnchor),
+            noAccessView.bottomAnchor.constraint(equalTo: c.bottomAnchor)
         ])
     }
 
-    /// iPhone / iPad 键盘高度自适应
-    private func applyKeyboardHeight() {
-        guard !didLayout || view.bounds.width > 0 else { return }
-        didLayout = true
-        let regular = traitCollection.horizontalSizeClass == .regular
-        let height: CGFloat = regular ? 340 : 296
-        preferredContentSize = CGSize(width: view.bounds.width, height: height)
-    }
+    // MARK: - 数据
 
-    // MARK: - 同步
-
-    private func performKeyboardSync() {
+    private func syncAndReload() {
         let granted = hasFullAccess
         RuntimeEnvironment.shared.reportKeyboardHeartbeat(fullAccess: granted)
         noAccessView.isHidden = granted
         tableView.isHidden = !granted
         toolbar.isUserInteractionEnabled = granted
-        guard granted else {
-            titleLabel.text = "开启完全访问"
-            return
-        }
-        titleLabel.text = "剪贴历史"
+        titleLabel.text = granted ? "剪贴历史" : "开启完全访问"
+        guard granted else { return }
         _ = PasteboardSync.shared.performSync(sourceApp: "keyboard")
-        ClipStore.shared.reloadSync()
+        reloadData()
     }
 
-    /// 仅「未授权遮罩」调用：沿响应链打开本 App 的系统设置
-    private func openHostSettings() {
-        let selector = NSSelectorFromString("openURL:")
-        var responder: UIResponder? = self
-        while let current = responder {
-            if current.responds(to: selector) {
-                _ = current.perform(selector, with: URL(string: UIApplication.openSettingsURLString))
-                return
-            }
-            responder = current.next
-        }
+    @objc private func clipboardChanged() {
+        guard hasFullAccess else { return }
+        _ = PasteboardSync.shared.performSync(sourceApp: "keyboard-notify")
+        reloadData()
     }
 
     private func reloadData() {
-        allItems = ClipStore.shared.fetchAll()
+        storedItems = ClipStore.shared.fetchAll()
+        // 兜底：共享库为空时把当前剪贴板作为临时条目，保证键盘里始终有可复制项
+        transientItems = storedItems.isEmpty ? (currentPasteboardItem().map { [$0] } ?? []) : []
         applyFilter()
     }
 
+    private func currentPasteboardItem() -> ClipItem? {
+        let pb = UIPasteboard.general
+        if pb.hasImages, let img = pb.image { return ClipItem.makeImage(img, sourceApp: "current") }
+        if pb.hasURLs, let u = pb.url { return ClipItem.makeText(u.absoluteString, sourceApp: "current") }
+        if pb.hasStrings, let s = pb.string, !s.isEmpty { return ClipItem.makeText(s, sourceApp: "current") }
+        return nil
+    }
+
     private func applyFilter() {
-        var filter = ClipFilter(keyword: keyword, type: scopeType)
-        filter.includeSensitive = false
-        visibleItems = ClipStore.shared.fetch(filter: filter)
+        var result = transientItems + storedItems
+        if let t = scopeType { result = result.filter { $0.type == t } }
+        if !keyword.isEmpty {
+            let k = keyword.lowercased()
+            result = result.filter { $0.searchableText.lowercased().contains(k) }
+        }
+        result = result.filter { !$0.isSensitive }
+        visibleItems = result
         emptyLabel.isHidden = !visibleItems.isEmpty
-        emptyLabel.text = keyword.isEmpty ? "暂无历史记录\n唤起键盘会自动同步剪贴板" : "没有匹配记录"
         tableView.reloadData()
     }
 
@@ -281,8 +305,7 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func toggleSearch() {
         let show = searchBar.isHidden
-        searchBar.isHidden = false
-        scope.isHidden = false
+        searchBar.isHidden = false; scope.isHidden = false
         UIView.animate(withDuration: 0.2) {
             self.searchBar.alpha = show ? 1 : 0
             self.scope.alpha = show ? 1 : 0
@@ -291,21 +314,14 @@ final class KeyboardViewController: UIInputViewController {
             self.blurView.contentView.layoutIfNeeded()
         } completion: { _ in
             if !show {
-                self.searchBar.isHidden = true
-                self.scope.isHidden = true
-                self.searchBar.text = nil
-                self.keyword = ""
+                self.searchBar.isHidden = true; self.scope.isHidden = true
+                self.searchBar.text = nil; self.keyword = ""
                 self.applyFilter()
-            } else {
-                self.searchBar.becomeFirstResponder()
-            }
+            } else { self.searchBar.becomeFirstResponder() }
         }
     }
 
-    @objc private func searchChanged() {
-        keyword = searchBar.text ?? ""
-        applyFilter()
-    }
+    @objc private func searchChanged() { keyword = searchBar.text ?? ""; applyFilter() }
 
     @objc private func scopeChanged() {
         switch scope.selectedSegmentIndex {
@@ -317,12 +333,11 @@ final class KeyboardViewController: UIInputViewController {
         applyFilter()
     }
 
-    @objc private func handleDismiss() { super.dismissKeyboard() }
+    @objc private func handleDismiss() { dismissKeyboard() }
     @objc private func handleSwitchKeyboard() { advanceToNextInputMode() }
 
-    // MARK: - 复制 / 插入（均不跳转 App）
+    // MARK: - 复制 / 插入（不跳转 App）
 
-    /// 一键复制：写入剪贴板；文本同时插入当前输入框
     private func copyAndInsert(_ item: ClipItem) {
         PasteboardSync.shared.writeToPasteboard(item)
         switch item.type {
@@ -330,59 +345,58 @@ final class KeyboardViewController: UIInputViewController {
             if let text = item.text {
                 textDocumentProxy.insertText(text)
                 showToast("已复制并插入")
-            } else {
-                showToast("已复制")
-            }
-        case .image:
-            showToast("图片已复制")
+            } else { showToast("已复制") }
+        case .image: showToast("图片已复制，到输入框长按粘贴")
         }
         HapticHelper.tap()
     }
 
-    /// 仅复制，不插入
     private func copyOnly(_ item: ClipItem) {
         PasteboardSync.shared.writeToPasteboard(item)
-        HapticHelper.tap()
-        showToast("已复制")
+        HapticHelper.tap(); showToast("已复制")
     }
 
     private var toastWorkItem: DispatchWorkItem?
     private func showToast(_ message: String) {
         toastWorkItem?.cancel()
-        let toast = UILabel()
-        toast.text = message
-        toast.textColor = .white
-        toast.backgroundColor = UIColor.label.withAlphaComponent(0.82)
-        toast.font = .systemFont(ofSize: 13, weight: .medium)
-        toast.textAlignment = .center
-        toast.layer.cornerRadius = 16
-        toast.layer.cornerCurve = .continuous
-        toast.clipsToBounds = true
-        toast.translatesAutoresizingMaskIntoConstraints = false
-        toast.alpha = 0
-        blurView.contentView.addSubview(toast)
+        let t = UILabel()
+        t.text = message; t.textColor = .white
+        t.backgroundColor = UIColor.label.withAlphaComponent(0.82)
+        t.font = .systemFont(ofSize: 13, weight: .medium)
+        t.textAlignment = .center
+        t.layer.cornerRadius = 16; t.layer.cornerCurve = .continuous; t.clipsToBounds = true
+        t.translatesAutoresizingMaskIntoConstraints = false; t.alpha = 0
+        blurView.contentView.addSubview(t)
         NSLayoutConstraint.activate([
-            toast.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
-            toast.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor, constant: -18),
-            toast.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            toast.heightAnchor.constraint(equalToConstant: 32)
+            t.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
+            t.bottomAnchor.constraint(equalTo: blurView.contentView.safeAreaLayoutGuide.bottomAnchor, constant: -14),
+            t.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            t.heightAnchor.constraint(equalToConstant: 32)
         ])
-        UIView.animate(withDuration: 0.18) { toast.alpha = 1 }
-        let work = DispatchWorkItem {
-            UIView.animate(withDuration: 0.25) { toast.alpha = 0 } completion: { _ in toast.removeFromSuperview() }
+        UIView.animate(withDuration: 0.18) { t.alpha = 1 }
+        let w = DispatchWorkItem {
+            UIView.animate(withDuration: 0.25) { t.alpha = 0 } completion: { _ in t.removeFromSuperview() }
         }
-        toastWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
+        toastWorkItem = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: w)
+    }
+
+    /// 仅未授权遮罩使用：沿响应链打开本 App 系统设置
+    private func openHostSettings() {
+        let sel = NSSelectorFromString("openURL:")
+        var r: UIResponder? = self
+        while let cur = r {
+            if cur.responds(to: sel) {
+                _ = cur.perform(sel, with: URL(string: UIApplication.openSettingsURLString))
+                return
+            }
+            r = cur.next
+        }
     }
 }
 
-// MARK: - DataSource & Delegate
-
 extension KeyboardViewController: UITableViewDataSource, UITableViewDelegate {
-
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        visibleItems.count
-    }
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { visibleItems.count }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: KeyboardHistoryCell.reuseID, for: indexPath) as! KeyboardHistoryCell
@@ -395,18 +409,13 @@ extension KeyboardViewController: UITableViewDataSource, UITableViewDelegate {
         copyAndInsert(visibleItems[indexPath.row])
     }
 
-    /// 长按菜单：复制并插入 / 仅复制（都不跳转）
     func tableView(_ tableView: UITableView,
                    contextMenuConfigurationForRowAt indexPath: IndexPath,
                    point: CGPoint) -> UIContextMenuConfiguration? {
         let item = visibleItems[indexPath.row]
         return UIContextMenuConfiguration(identifier: indexPath as NSCopying, previewProvider: nil) { [weak self] _ in
-            let insert = UIAction(title: "复制并插入", image: UIImage(systemName: "text.cursor")) { _ in
-                self?.copyAndInsert(item)
-            }
-            let copy = UIAction(title: "仅复制", image: UIImage(systemName: "doc.on.doc")) { _ in
-                self?.copyOnly(item)
-            }
+            let insert = UIAction(title: "复制并插入", image: UIImage(systemName: "text.cursor")) { _ in self?.copyAndInsert(item) }
+            let copy = UIAction(title: "仅复制", image: UIImage(systemName: "doc.on.doc")) { _ in self?.copyOnly(item) }
             return UIMenu(title: "", children: [insert, copy])
         }
     }

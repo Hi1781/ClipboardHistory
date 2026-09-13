@@ -24,7 +24,7 @@ set -euo pipefail
 APP_NAME="ClipboardHistory"
 DEPLOY="16.0"; SDK_VER="16.4"
 TARGET="arm64-apple-ios${DEPLOY}"
-MARK_VER="2.2.0"; CUR_VER="5"
+MARK_VER="2.3.0"; CUR_VER="6"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${ROOT}/build-linux"
 APP="${BUILD}/Payload/${APP_NAME}.app"
@@ -47,6 +47,17 @@ done
 [[ -x "${SWIFT_TOOLCHAIN}/bin/swiftc" ]] || { echo "❌ 未找到 swiftc，请设置 SWIFT_TOOLCHAIN"; exit 1; }
 [[ -d "${IOS_SDK}" ]] || { echo "❌ 未找到 iOS SDK，请设置 IOS_SDK"; exit 1; }
 SWIFTC="${SWIFT_TOOLCHAIN}/bin/swiftc"
+
+# ---- ldid：把 App Group 等 entitlements 嵌入 ad-hoc 签名，
+#      SideStore/AltStore 设备端重签时会保留，主 App 与键盘才能共享数据容器 ----
+LDID="${LDID:-}"
+for c in "$LDID" "${ROOT}/../toolchain/bin/ldid" \
+         /home/user/.doubao/agent_mode/workspace/toolchain/bin/ldid "$(command -v ldid)"; do
+    [[ -z "$c" ]] && continue
+    if [[ -x "$c" ]]; then LDID="$c"; break; fi
+done
+[[ -n "$LDID" && -x "$LDID" ]] || { echo "❌ 未找到 ldid（用于嵌入 entitlements），请先编译 toolchain/bin/ldid"; exit 1; }
+echo "使用 ldid: $LDID"
 
 # ---- ld 包装：swiftc 链接时默认调 /usr/bin/ld(GNU)，需转 ld64.lld ----
 LINKBIN="${BUILD}/linkbin"; mkdir -p "$LINKBIN"
@@ -129,6 +140,15 @@ echo "==> [5/5] 通知内容扩展（MH_EXECUTE + NSExtensionMain）"
   -Xlinker -e -Xlinker _NSExtensionMain \
   -Xlinker -rpath -Xlinker @executable_path/../../Frameworks "${LINKV[@]}" \
   -o "${APP}/PlugIns/ClipboardNotify.appex/ClipboardNotify" "${ROOT}"/ClipboardNotify/*.swift
+
+# ---- 用 ldid 把 entitlements 嵌入 ad-hoc 签名（App Group 共享的关键）----
+# 主 App 与三个扩展都声明同一 App Group；框架 ClipKit 由宿主进程继承授权无需单独签。
+echo "==> ldid 嵌入 entitlements（App Group 共享）"
+"$LDID" -S"${ROOT}/ClipboardHistory/ClipboardHistory.entitlements"   "${APP}/ClipboardHistory"
+"$LDID" -S"${ROOT}/ClipboardKeyboard/ClipboardKeyboard.entitlements" "${APP}/PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard"
+"$LDID" -S"${ROOT}/ClipboardWidget/ClipboardWidget.entitlements"     "${APP}/PlugIns/ClipboardWidget.appex/ClipboardWidget"
+"$LDID" -S"${ROOT}/ClipboardNotify/ClipboardNotify.entitlements"     "${APP}/PlugIns/ClipboardNotify.appex/ClipboardNotify"
+echo "  ✓ 4 个可执行文件已写入 application-groups 授权"
 
 # ---- 组装 Bundle ----
 echo "==> 组装 Info.plist / PkgInfo / 图标"
@@ -217,6 +237,17 @@ for b,wantFT in bins:
     print(f"  ✓ {b} arm64/iOS/{ftName} + ad-hoc签名槽({ss}B)")
 print("Mach-O 全部通过")
 PY
+
+# ---- entitlements 校验：4 个可执行文件必须含 App Group，键盘才能读到主 App 数据 ----
+echo "==> entitlements 校验"
+for b in "ClipboardHistory" \
+         "PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard" \
+         "PlugIns/ClipboardWidget.appex/ClipboardWidget" \
+         "PlugIns/ClipboardNotify.appex/ClipboardNotify"; do
+  "$LDID" -e "${APP}/$b" | grep -q "group.com.clipboard.history" \
+    && echo "  ✓ $b 含 App Group" \
+    || { echo "  ❌ $b 缺少 App Group entitlements"; exit 1; }
+done
 
 # ---- 规范化打包裸 IPA（不签名、无 mobileprovision、无 _CodeSignature）----
 # 用 python zipfile 显式写标准结构：固定时间戳、标准 EOCD、无 zip64、

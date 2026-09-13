@@ -1,6 +1,13 @@
 # 更新日志 / Changelog
 
-## v2.2.0（当前版本）—— 修复扩展安装 + 键盘重构 + 六大捕获路径齐备
+## v2.3.0（当前版本）—— 修复键盘塌陷/读不到历史 + 打通 App Group 共享
+- 修复（键盘塌陷，iPad 实测）：键盘高度改用 `view.heightAnchor` 约束固定（替代在 iPad 不可靠的 preferredContentSize），并在 viewDidAppear/布局/旋转时持续校正；无论是否有历史记录都与系统官方键盘等高（iPhone 竖屏 291 / 横屏 204，iPad 竖屏 320 / 横屏 264），空状态显示提示但不收缩
+- 修复（iPad 顶部多余助理条）：viewDidLoad 清空 inputAssistantItem 的 leading/trailingBarButtonGroups，去掉系统撤销/重做/粘贴条与自定义 UI 重叠
+- 修复（键盘读不到主 App 历史、设置显示「键盘扩展 未检测到」）：根因是裸二进制 ad-hoc 签名未带 entitlements，SideStore 重签后 App Group 不生效，主 App 与键盘各自沙盒。现用 ldid 把 `com.apple.security.application-groups` 嵌入主 App 与三个扩展的签名，设备端重签后保留，共享容器/UserDefaults/心跳全部打通
+- 增强键盘逻辑：每次 viewWillAppear 重新双向同步并刷新；监听 UIPasteboard.changedNotification，键盘显示期间外部复制即时入库；共享库为空时用当前剪贴板内容兜底成临时条目，保证键盘里始终有可复制项；点按「复制并插入」、长按「仅复制」反馈更稳
+- 构建：新增 ldid 授权嵌入步骤与 entitlements 断言；新增 ClipboardNotify.entitlements；版本 2.3.0 (build 6)
+
+## v2.2.0 —— 修复扩展安装 + 键盘重构 + 六大捕获路径齐备
 - 修复（安装失败根因）：键盘/Widget/通知三个 .appex 主程序由错误的 MH_DYLIB 改为正确的 MH_EXECUTE（入口 NSExtensionMain），framework 仍为 MH_DYLIB；此前 installd 因扩展类型非法拒绝安装，表现为 SideStore IdeviceGatewayError 2、只能进容器
 - 修复（iLoader 报错）：弃用 zip 命令，改用规范化 zipfile 打包，标准 EOCD 位于文件末尾、无 zip64、固定时间戳、显式 unix 权限，解决 isideload「Could not find EOCD / Failed to open application archive」
 - 键盘重构：systemChromeMaterial 毛玻璃、胶囊工具栏、圆角卡片历史列表；点按一键复制并插入，长按可选「仅复制」；正常浏览复制路径绝不跳转宿主 App（仅未授权遮罩可去设置）；自动适配 iPhone/iPad 宽度与高度、深色模式
