@@ -1,6 +1,11 @@
 # 更新日志 / Changelog
 
-## v2.1.0（当前版本）—— LiveContainer 适配 + 权限引导
+## v2.1.1（当前版本）—— 修复 SideStore 签名安装失败
+- 修复：四个 Mach-O 链接时显式写入 ad-hoc 代码签名槽（LC_CODE_SIGNATURE + CodeDirectory）。此前 Swift 驱动默认关闭签名，SideStore 内置 ldid 重签时缺少标准签名头，安装阶段报 Minimuxer.IdeviceGatewayError 2 / Failed to install IPA
+- 修复：主 App 与两个扩展的 Info.plist 补齐 installd 必需的标准键 MinimumOSVersion、CFBundleSupportedPlatforms、DTPlatformName/DTPlatformVersion/DTSDKName/DTCompiler（此前手写 plist 缺失，会被判定为非标准包）
+- 构建：Mach-O 校验新增签名槽断言，防止回归
+
+## v2.1.0 —— LiveContainer 适配 + 权限引导
 - 新增：RuntimeEnvironment 运行环境识别，多信号检测 LiveContainer 容器（LC_HOME_PATH、LC_ 环境变量、容器路径、注入镜像）
 - 新增：LiveContainer 下能力降级——App Group 不可用时 UserDefaults/SQLite 自动回退到容器内沙盒，保证主 App 功能完整
 - 适配：LiveContainer 官方限制（guest 无法注册键盘/Widget 扩展），引导页动态切换为容器模式说明

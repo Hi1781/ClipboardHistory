@@ -24,7 +24,7 @@ set -euo pipefail
 APP_NAME="ClipboardHistory"
 DEPLOY="16.0"; SDK_VER="16.4"
 TARGET="arm64-apple-ios${DEPLOY}"
-MARK_VER="2.1.0"; CUR_VER="3"
+MARK_VER="2.1.1"; CUR_VER="4"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${ROOT}/build-linux"
 APP="${BUILD}/Payload/${APP_NAME}.app"
@@ -81,7 +81,10 @@ fi
 
 COMMON=(-target "$TARGET" -sdk "$IOS_SDK" -resource-dir "$RES" -O -parse-as-library
         -Xcc -fmodules-cache-path="${BUILD}/mcapp")
-LINKV=(-Xlinker -platform_version -Xlinker ios -Xlinker "${DEPLOY}.0" -Xlinker "$SDK_VER")
+# 显式写入 ad-hoc 代码签名槽（LC_CODE_SIGNATURE + CodeDirectory），
+# 否则 Swift 驱动默认关闭，SideStore/ldid 重签时会因缺少签名头而安装失败。
+LINKV=(-Xlinker -adhoc_codesign \
+       -Xlinker -platform_version -Xlinker ios -Xlinker "${DEPLOY}.0" -Xlinker "$SDK_VER")
 
 mkdir -p "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule"
 mkdir -p "${APP}/PlugIns/ClipboardKeyboard.appex" "${APP}/PlugIns/ClipboardWidget.appex"
@@ -129,6 +132,30 @@ printf 'APPL????' > "${APP}/PkgInfo"
 printf 'XPC!????' > "${APP}/PlugIns/ClipboardKeyboard.appex/PkgInfo"
 printf 'XPC!????' > "${APP}/PlugIns/ClipboardWidget.appex/PkgInfo"
 
+# 补齐 installd 校验所需、手写 plist 缺失的标准键（Xcode 构建时会自动生成）
+python3 - "${DEPLOY}" "${SDK_VER}" \
+  "${APP}/Info.plist" \
+  "${APP}/PlugIns/ClipboardKeyboard.appex/Info.plist" \
+  "${APP}/PlugIns/ClipboardWidget.appex/Info.plist" <<'PY'
+import sys, plistlib
+minos, sdkver = sys.argv[1], sys.argv[2]
+std = {
+    "MinimumOSVersion": minos,
+    "CFBundleSupportedPlatforms": ["iPhoneOS"],
+    "DTPlatformName": "iphoneos",
+    "DTPlatformVersion": sdkver,
+    "DTSDKName": f"iphoneos{sdkver}",
+    "DTCompiler": "com.apple.compilers.llvm.clang.1_0",
+}
+for path in sys.argv[3:]:
+    with open(path, "rb") as f:
+        pl = plistlib.load(f)
+    for k, v in std.items():
+        pl.setdefault(k, v)
+    with open(path, "wb") as f:
+        plistlib.dump(pl, f, fmt=plistlib.FMT_XML)
+PY
+
 # 生成散件图标（无 actool）
 python3 - "${APP}" "${ROOT}/ClipboardHistory/Resources/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" <<'PY'
 import sys
@@ -156,13 +183,18 @@ for b in bins:
     d=open(os.path.join(app,b),'rb').read()
     magic,cput=struct.unpack('<Ii',d[:8]);n=struct.unpack('<I',d[16:20])[0]
     assert magic==0xfeedfacf and cput==0x0100000c, b+" 非 arm64 Mach-O64"
-    off=32;plat=None
+    off=32;plat=None;sig=None
     for _ in range(n):
         cmd,cs=struct.unpack('<II',d[off:off+8])
         if cmd==0x32: plat=struct.unpack('<I',d[off+8:off+12])[0]
+        if cmd==0x1d: sig=struct.unpack('<II',d[off+8:off+16])  # dataoff,datasize
         off+=cs
     assert plat==2, b+" 平台非 iOS"
-    print(f"  ✓ {b} arm64/iOS")
+    assert sig and sig[1]>0, b+" 缺少 LC_CODE_SIGNATURE 签名槽，SideStore 无法重签"
+    so,ss=sig
+    magic=struct.unpack('>I',d[so:so+4])[0]
+    assert magic==0xfade0cc0, b+" 签名 SuperBlob magic 异常"
+    print(f"  ✓ {b} arm64/iOS + ad-hoc签名槽({ss}B)")
 print("Mach-O 全部通过")
 PY
 
