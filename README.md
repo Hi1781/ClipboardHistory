@@ -39,6 +39,7 @@ iOS 沙盒与隐私机制下，**非越狱设备无法做到 App 完全后台时
 ---
 
 ## 二、工程结构
+```
 ClipboardHistoryApp/
 ├── ClipKit/                    # 共享框架（模型 / SQLite / 同步 / 密钥 / 云 / 后台）
 │   ├── ClipItem.swift          # 数据模型 + 排序 + UIColor/UIImage 扩展
@@ -60,6 +61,7 @@ ClipboardHistoryApp/
 │   └── Resources/              # Info.plist / Assets.xcassets(AppIcon)
 ├── ClipboardKeyboard/          # 键盘扩展
 └── ClipboardWidget/            # WidgetKit 小组件
+```
 **Target / Bundle ID**
 
 | Target | 类型 | Bundle ID |
