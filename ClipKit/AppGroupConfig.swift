@@ -40,6 +40,11 @@ public enum AppGroupConfig {
         // v2.1 权限引导 / 键盘心跳
         public static let onboardingCompleted = "onboardingCompleted.v2_1"
         public static let keyboardHeartbeat = "keyboard.fullAccessHeartbeat"
+        // v2.2 六大捕获路径开关
+        public static let pipKeepAliveEnabled = "pipKeepAliveEnabled"        // 路径1 PiP 轮询
+        public static let audioKeepAliveEnabled = "audioKeepAliveEnabled"    // 路径2 静音音频保活
+        public static let notifyCaptureEnabled = "notifyCaptureEnabled"      // 路径3 本地通知
+        public static let backgroundPollInterval = "backgroundPollInterval"  // 后台轮询间隔(秒)
     }
 
     /// 共享 UserDefaults：优先 App Group 套件；LiveContainer / 无 group 时
@@ -60,7 +65,11 @@ public enum AppGroupConfig {
             DefaultsKey.hapticFeedbackEnabled: true,
             DefaultsKey.showPinnedFirst: true,
             DefaultsKey.maxRecordCount: 1000,
-            DefaultsKey.onboardingCompleted: false
+            DefaultsKey.onboardingCompleted: false,
+            DefaultsKey.pipKeepAliveEnabled: false,
+            DefaultsKey.audioKeepAliveEnabled: false,
+            DefaultsKey.notifyCaptureEnabled: true,
+            DefaultsKey.backgroundPollInterval: 3.0
         ])
     }
 }

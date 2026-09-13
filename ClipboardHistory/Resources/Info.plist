@@ -82,6 +82,8 @@
 	<array>
 		<string>fetch</string>
 		<string>processing</string>
+		<string>audio</string>
+		<string>picture-in-picture</string>
 	</array>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>

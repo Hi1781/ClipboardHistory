@@ -23,6 +23,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = nav
         self.window = window
         window.makeKeyAndVisible()
+        // 路径1：挂载画中画保活所需的隐藏播放层（真正开启由用户在设置内点按）
+        PiPKeepAlive.shared.install(in: window)
         presentOnboardingIfNeeded(from: nav)
     }
 
@@ -40,11 +42,17 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         NotificationCenter.default.post(name: .appDidBecomeActive, object: nil)
+        // 路径6：进入前台立即双向同步（有则入库，空则按设置回填）
+        _ = PasteboardSync.shared.performSync(sourceApp: "become-active")
         BackgroundMonitor.shared.handleBecomeActive()
+        // 回到前台后停止静音音频保活，避免占用音频会话
+        SilentAudioKeepAlive.shared.stop()
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         BackgroundMonitor.shared.handleEnterBackground()
+        // 路径2：退到后台时，若用户开启，则用静音音频保活并低频轮询
+        SilentAudioKeepAlive.shared.start()
     }
 }
 

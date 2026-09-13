@@ -59,6 +59,13 @@ public final class BackgroundMonitor {
             if changed {
                 AppGroupConfig.sharedDefaults?.set(Date().timeIntervalSince1970,
                                                    forKey: AppGroupConfig.DefaultsKey.lastBackgroundPoll)
+                // 后台读到内容则直接入库并发通知；否则发占位通知，等用户下拉扩展读取
+                let result = PasteboardSync.shared.performSync(sourceApp: "bgtask")
+                if case .imported(let item) = result {
+                    ClipNotificationManager.shared.notifyCaptured(item)
+                } else {
+                    ClipNotificationManager.shared.notifyChangeCountOnly()
+                }
             }
         }
         task?.expirationHandler = { work.cancel() }

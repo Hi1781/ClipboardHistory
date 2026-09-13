@@ -73,8 +73,13 @@ final class SettingsViewController: UITableViewController {
                 Row(kind: .toggle("自动去重（相同内容不重复保存）", k.deduplicateEnabled, #selector(toggleDedup(_:)), d(k.deduplicateEnabled, true)))
             ]),
             (.background, [
-                Row(kind: .toggle("启用后台监听（前台近实时轮询）", k.backgroundMonitorEnabled, #selector(toggleBackground(_:)), d(k.backgroundMonitorEnabled, false))),
-                Row(kind: .detail("工作原理", "打开/键盘唤起时捕获，后台由系统调度"))
+                Row(kind: .toggle("路径5/6 前台轮询 + 系统后台刷新", k.backgroundMonitorEnabled, #selector(toggleBackground(_:)), d(k.backgroundMonitorEnabled, false))),
+                Row(kind: .toggle("路径1 画中画保活轮询", k.pipKeepAliveEnabled, #selector(togglePiP(_:)), d(k.pipKeepAliveEnabled, false))),
+                Row(kind: .action("立即开启画中画悬浮窗", .systemBlue)),
+                Row(kind: .toggle("路径2 静音音频后台保活", k.audioKeepAliveEnabled, #selector(toggleAudioKeepAlive(_:)), d(k.audioKeepAliveEnabled, false))),
+                Row(kind: .toggle("路径3 捕获后发本地通知", k.notifyCaptureEnabled, #selector(toggleNotify(_:)), d(k.notifyCaptureEnabled, true))),
+                Row(kind: .detail("画中画状态", PiPKeepAlive.shared.isActive ? "运行中" : "未开启")),
+                Row(kind: .detail("捕获路径", "键盘/前台/PiP/音频/BGTask/通知"))
             ]),
             (.cloud, [
                 Row(kind: .toggle("iCloud 多设备同步（仅文本）", k.iCloudSyncEnabled, #selector(toggleCloud(_:)), d(k.iCloudSyncEnabled, false))),
@@ -92,7 +97,7 @@ final class SettingsViewController: UITableViewController {
                 Row(kind: .action("管理全部标签", .systemBlue))
             ]),
             (.about, [
-                Row(kind: .detail("版本", "2.1.1")),
+                Row(kind: .detail("版本", "2.2.0")),
                 Row(kind: .detail("数据存储", "本地 SQLite + AES-256 加密")),
                 Row(kind: .detail("密钥保护", "iOS Keychain")),
                 Row(kind: .detail("隐私说明", "数据不出设备，iCloud 走私有库"))
@@ -169,6 +174,7 @@ final class SettingsViewController: UITableViewController {
         let rowIndex = indexPath.row
         switch (section, rowIndex) {
         case (.permission, 0): showOnboarding()
+        case (.background, 2): startPiPNow()
         case (.storage, 0): showAutoDeletePicker()
         case (.storage, 1): showMaxRecordPicker()
         case (.storage, 2): purgeNow()
@@ -195,6 +201,37 @@ final class SettingsViewController: UITableViewController {
         } else {
             BackgroundMonitor.shared.stopForegroundPolling()
         }
+    }
+
+    @objc private func togglePiP(_ s: UISwitch) {
+        guard PiPKeepAlive.isSupported else {
+            s.isOn = false
+            AppGroupConfig.sharedDefaults?.set(false, forKey: AppGroupConfig.DefaultsKey.pipKeepAliveEnabled)
+            showAlert(title: "设备不支持画中画", message: "当前设备/系统状态无法开启画中画，请改用其它捕获路径")
+            return
+        }
+        AppGroupConfig.sharedDefaults?.set(s.isOn, forKey: AppGroupConfig.DefaultsKey.pipKeepAliveEnabled)
+        if s.isOn { startPiPNow() } else { PiPKeepAlive.shared.stopPiP() }
+    }
+
+    @objc private func toggleAudioKeepAlive(_ s: UISwitch) {
+        AppGroupConfig.sharedDefaults?.set(s.isOn, forKey: AppGroupConfig.DefaultsKey.audioKeepAliveEnabled)
+        if s.isOn { SilentAudioKeepAlive.shared.start() } else { SilentAudioKeepAlive.shared.stop() }
+    }
+
+    @objc private func toggleNotify(_ s: UISwitch) {
+        AppGroupConfig.sharedDefaults?.set(s.isOn, forKey: AppGroupConfig.DefaultsKey.notifyCaptureEnabled)
+        if s.isOn { ClipNotificationManager.shared.requestAuthorization() }
+    }
+
+    private func startPiPNow() {
+        AppGroupConfig.sharedDefaults?.set(true, forKey: AppGroupConfig.DefaultsKey.pipKeepAliveEnabled)
+        let ok = PiPKeepAlive.shared.startPiP()
+        if !ok {
+            showAlert(title: "暂时无法开启画中画",
+                      message: "请先在任意页面播放过视频或稍后再试；开启后保持小窗显示即可在后台轮询剪贴板")
+        }
+        buildModel(); tableView.reloadData()
     }
 
     @objc private func toggleCloud(_ s: UISwitch) {

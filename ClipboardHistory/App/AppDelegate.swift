@@ -16,8 +16,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         // 出厂默认设置
         AppGroupConfig.registerDefaults()
-        // 后台监听任务注册
+        // 后台监听任务注册（路径5 BGTask）
         BackgroundMonitor.shared.register()
+        // 本地通知授权（路径3：后台捕获通知 + 内容扩展）
+        ClipNotificationManager.shared.requestAuthorization()
         // 启动时执行一次同步与清理
         ClipStore.shared.reloadSync()
         scheduleRoutinePurge()

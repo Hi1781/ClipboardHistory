@@ -1,6 +1,16 @@
 # 更新日志 / Changelog
 
-## v2.1.1（当前版本）—— 修复 SideStore 签名安装失败
+## v2.2.0（当前版本）—— 修复扩展安装 + 键盘重构 + 六大捕获路径齐备
+- 修复（安装失败根因）：键盘/Widget/通知三个 .appex 主程序由错误的 MH_DYLIB 改为正确的 MH_EXECUTE（入口 NSExtensionMain），framework 仍为 MH_DYLIB；此前 installd 因扩展类型非法拒绝安装，表现为 SideStore IdeviceGatewayError 2、只能进容器
+- 修复（iLoader 报错）：弃用 zip 命令，改用规范化 zipfile 打包，标准 EOCD 位于文件末尾、无 zip64、固定时间戳、显式 unix 权限，解决 isideload「Could not find EOCD / Failed to open application archive」
+- 键盘重构：systemChromeMaterial 毛玻璃、胶囊工具栏、圆角卡片历史列表；点按一键复制并插入，长按可选「仅复制」；正常浏览复制路径绝不跳转宿主 App（仅未授权遮罩可去设置）；自动适配 iPhone/iPad 宽度与高度、深色模式
+- 路径1 PiP 画中画保活：隐藏循环视频 + AVPictureInPictureController，悬浮窗存活时 1.5s 轮询 changeCount
+- 路径2 静音音频保活：mixWithOthers 后台播放 + 可配置低频轮询，退到后台自动启用、回前台自动停止
+- 路径3 本地通知 + 新增 ClipboardNotify 通知内容扩展：后台检测到变化发通知，用户下拉时由扩展读取入库并展示
+- 路径4 键盘、路径5 BGTaskScheduler、路径6 前台激活同步全部保留并联动通知；设置页新增六路径控制台
+- 主 Info.plist UIBackgroundModes 增加 audio、picture-in-picture；版本 2.2.0 (build 5)
+
+## v2.1.1 —— 修复 SideStore 签名安装失败
 - 修复：四个 Mach-O 链接时显式写入 ad-hoc 代码签名槽（LC_CODE_SIGNATURE + CodeDirectory）。此前 Swift 驱动默认关闭签名，SideStore 内置 ldid 重签时缺少标准签名头，安装阶段报 Minimuxer.IdeviceGatewayError 2 / Failed to install IPA
 - 修复：主 App 与两个扩展的 Info.plist 补齐 installd 必需的标准键 MinimumOSVersion、CFBundleSupportedPlatforms、DTPlatformName/DTPlatformVersion/DTSDKName/DTCompiler（此前手写 plist 缺失，会被判定为非标准包）
 - 构建：Mach-O 校验新增签名槽断言，防止回归

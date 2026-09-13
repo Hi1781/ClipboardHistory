@@ -24,7 +24,7 @@ set -euo pipefail
 APP_NAME="ClipboardHistory"
 DEPLOY="16.0"; SDK_VER="16.4"
 TARGET="arm64-apple-ios${DEPLOY}"
-MARK_VER="2.1.1"; CUR_VER="4"
+MARK_VER="2.2.0"; CUR_VER="5"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${ROOT}/build-linux"
 APP="${BUILD}/Payload/${APP_NAME}.app"
@@ -87,7 +87,9 @@ LINKV=(-Xlinker -adhoc_codesign \
        -Xlinker -platform_version -Xlinker ios -Xlinker "${DEPLOY}.0" -Xlinker "$SDK_VER")
 
 mkdir -p "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule"
-mkdir -p "${APP}/PlugIns/ClipboardKeyboard.appex" "${APP}/PlugIns/ClipboardWidget.appex"
+mkdir -p "${APP}/PlugIns/ClipboardKeyboard.appex" \
+         "${APP}/PlugIns/ClipboardWidget.appex" \
+         "${APP}/PlugIns/ClipboardNotify.appex"
 
 subst(){ # $1=exec/module  $2=bundleid  $3=src
   sed -e "s/\\\$(EXECUTABLE_NAME)/$1/g" -e "s/\\\$(PRODUCT_MODULE_NAME)/$1/g" \
@@ -95,32 +97,38 @@ subst(){ # $1=exec/module  $2=bundleid  $3=src
       -e "s/\\\$(MARKETING_VERSION)/${MARK_VER}/g" -e "s/\\\$(CURRENT_PROJECT_VERSION)/${CUR_VER}/g" "$3"
 }
 
-echo "==> [1/4] ClipKit.framework"
+echo "==> [1/5] ClipKit.framework"
 mapfile -t KITSRC < <(find "${ROOT}/ClipKit" -name '*.swift' | sort)
 "$SWIFTC" "${COMMON[@]}" -module-name ClipKit -emit-module -emit-library \
   -emit-module-path "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule/arm64-apple-ios.swiftmodule" \
   -Xlinker -install_name -Xlinker @rpath/ClipKit.framework/ClipKit "${LINKV[@]}" \
   -o "${APP}/Frameworks/ClipKit.framework/ClipKit" "${KITSRC[@]}"
 
-echo "==> [2/4] 主 App"
+echo "==> [2/5] 主 App"
 mapfile -t APPSRC < <(find "${ROOT}/ClipboardHistory" -name '*.swift' | sort)
 "$SWIFTC" "${COMMON[@]}" -module-name ClipboardHistory -emit-executable \
   -F "${APP}/Frameworks" -I "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule" \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks "${LINKV[@]}" \
   -o "${APP}/ClipboardHistory" "${APPSRC[@]}"
 
-echo "==> [3/4] 键盘扩展"
-"$SWIFTC" "${COMMON[@]}" -module-name ClipboardKeyboard -emit-library \
+echo "==> [3/5] 键盘扩展（MH_EXECUTE + NSExtensionMain）"
+# appex 主程序必须是可执行文件 MH_EXECUTE（非 dylib），否则 installd 拒绝安装
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardKeyboard -emit-executable \
   -F "${APP}/Frameworks" -I "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule" \
-  -Xlinker -install_name -Xlinker @rpath/ClipboardKeyboard.appex/ClipboardKeyboard \
-  -Xlinker -rpath -Xlinker @executable_path/Frameworks \
+  -Xlinker -e -Xlinker _NSExtensionMain \
   -Xlinker -rpath -Xlinker @executable_path/../../Frameworks "${LINKV[@]}" \
   -o "${APP}/PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard" "${ROOT}"/ClipboardKeyboard/*.swift
 
-echo "==> [4/4] Widget 扩展"
-"$SWIFTC" "${COMMON[@]}" -module-name ClipboardWidget -emit-library \
-  -Xlinker -install_name -Xlinker @rpath/ClipboardWidget.appex/ClipboardWidget "${LINKV[@]}" \
+echo "==> [4/5] Widget 扩展（MH_EXECUTE，@main 入口）"
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardWidget -emit-executable "${LINKV[@]}" \
   -o "${APP}/PlugIns/ClipboardWidget.appex/ClipboardWidget" "${ROOT}"/ClipboardWidget/*.swift
+
+echo "==> [5/5] 通知内容扩展（MH_EXECUTE + NSExtensionMain）"
+"$SWIFTC" "${COMMON[@]}" -module-name ClipboardNotify -emit-executable \
+  -F "${APP}/Frameworks" -I "${APP}/Frameworks/ClipKit.framework/Modules/ClipKit.swiftmodule" \
+  -Xlinker -e -Xlinker _NSExtensionMain \
+  -Xlinker -rpath -Xlinker @executable_path/../../Frameworks "${LINKV[@]}" \
+  -o "${APP}/PlugIns/ClipboardNotify.appex/ClipboardNotify" "${ROOT}"/ClipboardNotify/*.swift
 
 # ---- 组装 Bundle ----
 echo "==> 组装 Info.plist / PkgInfo / 图标"
@@ -128,15 +136,22 @@ subst ClipboardHistory com.clipboard.history "${ROOT}/ClipboardHistory/Resources
 subst ClipKit com.clipboard.kit "${ROOT}/ClipKit/Info.plist" > "${APP}/Frameworks/ClipKit.framework/Info.plist"
 subst ClipboardKeyboard com.clipboard.history.keyboard "${ROOT}/ClipboardKeyboard/Resources/Info.plist" > "${APP}/PlugIns/ClipboardKeyboard.appex/Info.plist"
 subst ClipboardWidget com.clipboard.history.widget "${ROOT}/ClipboardWidget/Info.plist" > "${APP}/PlugIns/ClipboardWidget.appex/Info.plist"
+subst ClipboardNotify com.clipboard.history.notify "${ROOT}/ClipboardNotify/Info.plist" > "${APP}/PlugIns/ClipboardNotify.appex/Info.plist"
 printf 'APPL????' > "${APP}/PkgInfo"
 printf 'XPC!????' > "${APP}/PlugIns/ClipboardKeyboard.appex/PkgInfo"
 printf 'XPC!????' > "${APP}/PlugIns/ClipboardWidget.appex/PkgInfo"
+printf 'XPC!????' > "${APP}/PlugIns/ClipboardNotify.appex/PkgInfo"
+
+# PiP / 静音音频保活所需资源
+cp -f "${ROOT}/ClipboardHistory/Resources/blank_pip.mp4" "${APP}/blank_pip.mp4"
+cp -f "${ROOT}/ClipboardHistory/Resources/silence.wav" "${APP}/silence.wav"
 
 # 补齐 installd 校验所需、手写 plist 缺失的标准键（Xcode 构建时会自动生成）
 python3 - "${DEPLOY}" "${SDK_VER}" \
   "${APP}/Info.plist" \
   "${APP}/PlugIns/ClipboardKeyboard.appex/Info.plist" \
-  "${APP}/PlugIns/ClipboardWidget.appex/Info.plist" <<'PY'
+  "${APP}/PlugIns/ClipboardWidget.appex/Info.plist" \
+  "${APP}/PlugIns/ClipboardNotify.appex/Info.plist" <<'PY'
 import sys, plistlib
 minos, sdkver = sys.argv[1], sys.argv[2]
 std = {
@@ -176,13 +191,17 @@ echo "==> Mach-O 校验"
 python3 - "${APP}" <<'PY'
 import struct,sys,glob,os
 app=sys.argv[1]
-bins=["ClipboardHistory","Frameworks/ClipKit.framework/ClipKit",
-"PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard","PlugIns/ClipboardWidget.appex/ClipboardWidget"]
-ok=True
-for b in bins:
+# (相对路径, 期望 filetype) 主程序与 appex=MH_EXECUTE(2)，framework=MH_DYLIB(6)
+bins=[("ClipboardHistory",2),
+("Frameworks/ClipKit.framework/ClipKit",6),
+("PlugIns/ClipboardKeyboard.appex/ClipboardKeyboard",2),
+("PlugIns/ClipboardWidget.appex/ClipboardWidget",2),
+("PlugIns/ClipboardNotify.appex/ClipboardNotify",2)]
+for b,wantFT in bins:
     d=open(os.path.join(app,b),'rb').read()
-    magic,cput=struct.unpack('<Ii',d[:8]);n=struct.unpack('<I',d[16:20])[0]
+    magic,cput,sub,ft,n=struct.unpack('<IiiII',d[:20])
     assert magic==0xfeedfacf and cput==0x0100000c, b+" 非 arm64 Mach-O64"
+    assert ft==wantFT, f"{b} filetype={ft}，期望 {wantFT}（appex 必须 MH_EXECUTE）"
     off=32;plat=None;sig=None
     for _ in range(n):
         cmd,cs=struct.unpack('<II',d[off:off+8])
@@ -192,15 +211,77 @@ for b in bins:
     assert plat==2, b+" 平台非 iOS"
     assert sig and sig[1]>0, b+" 缺少 LC_CODE_SIGNATURE 签名槽，SideStore 无法重签"
     so,ss=sig
-    magic=struct.unpack('>I',d[so:so+4])[0]
-    assert magic==0xfade0cc0, b+" 签名 SuperBlob magic 异常"
-    print(f"  ✓ {b} arm64/iOS + ad-hoc签名槽({ss}B)")
+    sm=struct.unpack('>I',d[so:so+4])[0]
+    assert sm==0xfade0cc0, b+" 签名 SuperBlob magic 异常"
+    ftName={2:"MH_EXECUTE",6:"MH_DYLIB"}.get(ft,ft)
+    print(f"  ✓ {b} arm64/iOS/{ftName} + ad-hoc签名槽({ss}B)")
 print("Mach-O 全部通过")
 PY
 
-# ---- 打包裸 IPA（不签名、无 mobileprovision、无 _CodeSignature）----
-echo "==> 打包 IPA"
+# ---- 规范化打包裸 IPA（不签名、无 mobileprovision、无 _CodeSignature）----
+# 用 python zipfile 显式写标准结构：固定时间戳、标准 EOCD、无 zip64、
+# 显式 unix 权限位（可执行文件 755），最大化兼容 SideStore/iLoader(isideload)/LiveContainer。
+echo "==> 规范化打包 IPA"
 rm -f "$OUT_IPA"
-( cd "$BUILD" && zip -qr -X "ClipboardHistory-${MARK_VER}-raw-unsigned.ipa" Payload )
+python3 - "$BUILD" "$OUT_IPA" <<'PY'
+import sys, os, zipfile, datetime
+build, out = sys.argv[1], sys.argv[2]
+root = os.path.join(build, "Payload")
+# Mach-O 可执行文件集合（需 0755）
+exec_names = {"ClipboardHistory", "ClipKit", "ClipboardKeyboard", "ClipboardWidget", "ClipboardNotify"}
+fixed = (2024, 1, 1, 0, 0, 0)
+
+def add_dir(zf, arc):
+    zi = zipfile.ZipInfo(arc + "/", fixed)
+    zi.create_system = 3            # Unix
+    zi.external_attr = (0o40755 << 16) | 0o040000  # drwxr-xr-x
+    zi.compress_type = zipfile.ZIP_STORED
+    zf.writestr(zi, b"")
+
+entries = []
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames.sort(); filenames.sort()
+    rel_dir = os.path.relpath(dirpath, build)
+    if rel_dir != ".":
+        entries.append(("dir", rel_dir, None))
+    for fn in filenames:
+        full = os.path.join(dirpath, fn)
+        arc = os.path.relpath(full, build)
+        entries.append(("file", arc, full))
+
+# 目录优先、同级按路径排序，保证 Payload/ 在最前
+entries.sort(key=lambda e: (e[1].count("/"), e[1]))
+with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9, allowZip64=False) as zf:
+    seen_dirs = set()
+    for kind, arc, full in entries:
+        # 确保父目录都已写入
+        parts = arc.split("/")[:-1]
+        for i in range(len(parts)):
+            d = "/".join(parts[:i+1])
+            if d not in seen_dirs:
+                add_dir(zf, d); seen_dirs.add(d)
+        if kind == "dir":
+            if arc not in seen_dirs: add_dir(zf, arc); seen_dirs.add(arc)
+            continue
+        zi = zipfile.ZipInfo(arc, fixed)
+        zi.create_system = 3
+        base = os.path.basename(arc)
+        mode = 0o755 if base in exec_names else 0o644
+        zi.external_attr = (mode << 16) | (0o100000 if mode == 0o644 else 0o100000)
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        with open(full, "rb") as f:
+            zf.writestr(zi, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+
+# 独立回读校验
+with zipfile.ZipFile(out) as z:
+    bad = z.testzip()
+    assert bad is None, f"坏条目 {bad}"
+    n = len(z.namelist())
+raw = open(out, "rb").read()
+assert raw.rfind(b"PK\x05\x06") == len(raw) - 22, "EOCD 不在文件末尾"
+assert b"PK\x06\x06" not in raw, "不应包含 zip64 EOCD"
+print(f"  规范化 zip 完成：{n} 条目，EOCD 位于末尾，无 zip64")
+PY
 echo "✅ 完成: ${OUT_IPA}"
 ls -lh "$OUT_IPA"
+shasum -a 256 "$OUT_IPA" | awk '{print "SHA256:",$1}'
