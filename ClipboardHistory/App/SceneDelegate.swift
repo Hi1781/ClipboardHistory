@@ -23,6 +23,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = nav
         self.window = window
         window.makeKeyAndVisible()
+        presentOnboardingIfNeeded(from: nav)
+    }
+
+    /// 首次启动（或版本升级后未完成引导）呈现权限引导
+    private func presentOnboardingIfNeeded(from host: UIViewController) {
+        AppGroupConfig.registerDefaults()
+        let done = AppGroupConfig.sharedDefaults?
+            .bool(forKey: AppGroupConfig.DefaultsKey.onboardingCompleted) ?? false
+        guard !done else { return }
+        let onboarding = OnboardingViewController()
+        onboarding.modalPresentationStyle = .fullScreen
+        onboarding.isModalInPresentation = true
+        host.present(onboarding, animated: true)
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {

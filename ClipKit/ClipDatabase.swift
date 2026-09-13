@@ -57,18 +57,9 @@ final class ClipDatabase {
     // MARK: - 打开 / 建表
 
     private func databaseURL() -> URL? {
-        let fm = FileManager.default
-        let dir: URL?
-        if let container = fm.containerURL(forSecurityApplicationGroupIdentifier: AppGroupConfig.groupIdentifier) {
-            dir = container.appendingPathComponent("ClipboardHistory", isDirectory: true)
-        } else {
-            dir = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-        }
-        guard let folder = dir else { return nil }
-        if !fm.fileExists(atPath: folder.path) {
-            try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        }
-        return folder.appendingPathComponent("history.sqlite")
+        // 统一走 RuntimeEnvironment：标准安装用 App Group 共享容器，
+        // LiveContainer / 无 group 时自动落到其容器内 Documents。
+        RuntimeEnvironment.shared.databaseURL
     }
 
     private func open() {

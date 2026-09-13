@@ -99,6 +99,11 @@ final class KeyboardViewController: UIInputViewController {
         return label
     }()
 
+    /// 未开启「完全访问」时的引导遮罩
+    private lazy var noAccessView = KeyboardAccessGuideView(openSettings: { [weak self] in
+        self?.openHostSettings()
+    })
+
     // MARK: - 布局约束（搜索展开/收起时切换）
 
     private var headerHeight: NSLayoutConstraint!
@@ -143,6 +148,10 @@ final class KeyboardViewController: UIInputViewController {
         view.addSubview(scope)
         view.addSubview(tableView)
         view.addSubview(emptyLabel)
+
+        noAccessView.translatesAutoresizingMaskIntoConstraints = false
+        noAccessView.isHidden = true
+        view.addSubview(noAccessView)
 
         headerHeight = headerView.heightAnchor.constraint(equalToConstant: 40)
         tableTopToHeader = tableView.topAnchor.constraint(equalTo: headerView.bottomAnchor)
@@ -189,14 +198,24 @@ final class KeyboardViewController: UIInputViewController {
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 20)
+            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 20),
+
+            noAccessView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            noAccessView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            noAccessView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            noAccessView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
     // MARK: - Sync
 
     private func performKeyboardSync() {
-        guard hasFullAccess else {
+        let granted = hasFullAccess
+        // 上报心跳，供主 App 判断键盘是否已启用并授权
+        RuntimeEnvironment.shared.reportKeyboardHeartbeat(fullAccess: granted)
+        noAccessView.isHidden = granted
+        tableView.isHidden = !granted
+        guard granted else {
             titleLabel.text = "请开启完全访问"
             titleLabel.textColor = .systemOrange
             return
@@ -205,6 +224,19 @@ final class KeyboardViewController: UIInputViewController {
         titleLabel.textColor = .secondaryLabel
         _ = PasteboardSync.shared.performSync(sourceApp: "keyboard")
         ClipStore.shared.reloadSync()
+    }
+
+    /// 键盘扩展内跳转宿主设置（需完全访问；沿响应链找到能 openURL 的对象）
+    private func openHostSettings() {
+        let selector = NSSelectorFromString("openURL:")
+        var responder: UIResponder? = self
+        while let current = responder {
+            if current.responds(to: selector) {
+                _ = current.perform(selector, with: URL(string: UIApplication.openSettingsURLString))
+                return
+            }
+            responder = current.next
+        }
     }
 
     private func reloadData() {

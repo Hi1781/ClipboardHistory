@@ -1,8 +1,8 @@
 # 预编译裸 IPA（未签名）
 
-- 文件：ClipboardHistory-2.0.0-raw-unsigned.ipa
-- 大小：436K
-- SHA-256：`e9392fa31461e4b793a9d8729d79e2549271db1d75f8b5b346fd0b2d617957e1`
+- 文件：ClipboardHistory-2.1.0-raw-unsigned.ipa
+- 大小： 472K
+- SHA-256：`e773a9d4ad93dffc837136e40714585d052c2e528f4f85dbffcbf07ff8bb0736`
 - 架构：arm64（iPhone / iPad，最低 iOS 16）
 - 状态：**未签名、无 embedded.mobileprovision、无 _CodeSignature**，为 raw 裸包。
 

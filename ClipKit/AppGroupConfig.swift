@@ -37,11 +37,15 @@ public enum AppGroupConfig {
         // Widget
         public static let widgetLatestPreview = "widgetLatestPreview"
         public static let widgetLatestTime = "widgetLatestTime"
+        // v2.1 权限引导 / 键盘心跳
+        public static let onboardingCompleted = "onboardingCompleted.v2_1"
+        public static let keyboardHeartbeat = "keyboard.fullAccessHeartbeat"
     }
 
-    /// 共享 UserDefaults 实例
+    /// 共享 UserDefaults：优先 App Group 套件；LiveContainer / 无 group 时
+    /// 由 RuntimeEnvironment 回退到标准库（仍以可选类型返回，调用处无需改动）。
     public static var sharedDefaults: UserDefaults? {
-        UserDefaults(suiteName: groupIdentifier)
+        RuntimeEnvironment.shared.defaults
     }
 
     /// 注册出厂默认值
@@ -55,7 +59,8 @@ public enum AppGroupConfig {
             DefaultsKey.iCloudSyncEnabled: false,
             DefaultsKey.hapticFeedbackEnabled: true,
             DefaultsKey.showPinnedFirst: true,
-            DefaultsKey.maxRecordCount: 1000
+            DefaultsKey.maxRecordCount: 1000,
+            DefaultsKey.onboardingCompleted: false
         ])
     }
 }

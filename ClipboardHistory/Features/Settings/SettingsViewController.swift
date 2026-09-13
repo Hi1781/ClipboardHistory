@@ -11,9 +11,10 @@ import ClipKit
 final class SettingsViewController: UITableViewController {
 
     private enum Section: Int, CaseIterable {
-        case sync, background, cloud, storage, appearance, about
+        case permission, sync, background, cloud, storage, appearance, about
         var title: String {
             switch self {
+            case .permission: return "权限与引导"
             case .sync: return "同步"
             case .background: return "后台监听"
             case .cloud: return "iCloud"
@@ -58,7 +59,14 @@ final class SettingsViewController: UITableViewController {
 
     private func buildModel() {
         let k = AppGroupConfig.DefaultsKey.self
+        let env = RuntimeEnvironment.shared
         sections = [
+            (.permission, [
+                Row(kind: .action("查看权限与使用引导", .systemIndigo)),
+                Row(kind: .detail("运行模式", env.modeDisplayName)),
+                Row(kind: .detail("键盘扩展", keyboardStatusText())),
+                Row(kind: .detail("后台 App 刷新", backgroundRefreshText()))
+            ]),
             (.sync, [
                 Row(kind: .toggle("进入 App 时自动导入剪贴板", k.autoImportOnLaunch, #selector(toggleAutoImport(_:)), d(k.autoImportOnLaunch, true))),
                 Row(kind: .toggle("剪贴板为空时回填最新记录", k.autoRestoreWhenEmpty, #selector(toggleAutoRestore(_:)), d(k.autoRestoreWhenEmpty, false))),
@@ -84,12 +92,23 @@ final class SettingsViewController: UITableViewController {
                 Row(kind: .action("管理全部标签", .systemBlue))
             ]),
             (.about, [
-                Row(kind: .detail("版本", "2.0.0")),
+                Row(kind: .detail("版本", "2.1.0")),
                 Row(kind: .detail("数据存储", "本地 SQLite + AES-256 加密")),
                 Row(kind: .detail("密钥保护", "iOS Keychain")),
                 Row(kind: .detail("隐私说明", "数据不出设备，iCloud 走私有库"))
             ])
         ]
+    }
+
+    private func keyboardStatusText() -> String {
+        let env = RuntimeEnvironment.shared
+        if !env.systemExtensionsAvailable { return "容器内不可用" }
+        if env.keyboardEverActivated { return "已启用" }
+        return "未检测到"
+    }
+
+    private func backgroundRefreshText() -> String {
+        UIApplication.shared.backgroundRefreshStatus == .available ? "可用" : "已关闭"
     }
 
     private func autoDeleteText() -> String {
@@ -149,6 +168,7 @@ final class SettingsViewController: UITableViewController {
         let section = sections[indexPath.section].0
         let rowIndex = indexPath.row
         switch (section, rowIndex) {
+        case (.permission, 0): showOnboarding()
         case (.storage, 0): showAutoDeletePicker()
         case (.storage, 1): showMaxRecordPicker()
         case (.storage, 2): purgeNow()
@@ -243,6 +263,14 @@ final class SettingsViewController: UITableViewController {
     private func showTagManager() {
         let vc = TagManagerViewController()
         navigationController?.pushViewController(vc, animated: true)
+    }
+
+    private func showOnboarding() {
+        let vc = OnboardingViewController()
+        vc.modalPresentationStyle = .fullScreen
+        present(vc, animated: true) { [weak self, weak vc] in
+            vc?.onFinish = { self?.buildModel(); self?.tableView.reloadData() }
+        }
     }
 
     private func showAlert(title: String, message: String) {
