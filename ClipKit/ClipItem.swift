@@ -119,6 +119,27 @@ public struct ClipItem: Codable, Identifiable, Equatable, Sendable {
         )
     }
 
+    /// 用编辑后的文本生成「替换副本」：保留 id / 标签 / 置顶 / 敏感等元数据，
+    /// 更新文本内容、类型、哈希与时间戳（替换后该条按新时间重新排序）。
+    public func replacingText(_ edited: String) -> ClipItem {
+        let trimmed = edited.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newType: ClipContentType = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") ? .url : .text
+        return ClipItem(
+            id: self.id,
+            type: newType,
+            text: edited,
+            imageData: nil,
+            timestamp: Date(),
+            contentHash: CryptoHelper.sha256(edited),
+            isSensitive: self.isSensitive,
+            isPinned: self.isPinned,
+            tags: self.tags,
+            category: newType.displayName,
+            sourceApp: self.sourceApp,
+            pinnedAt: self.pinnedAt
+        )
+    }
+
     /// 从颜色创建
     public static func makeColor(_ color: UIColor) -> ClipItem {
         let hex = color.hexString

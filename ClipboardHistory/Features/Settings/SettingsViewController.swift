@@ -97,7 +97,7 @@ final class SettingsViewController: UITableViewController {
                 Row(kind: .action("管理全部标签", .systemBlue))
             ]),
             (.about, [
-                Row(kind: .detail("版本", "2.3.0")),
+                Row(kind: .detail("版本", "2.4.0")),
                 Row(kind: .detail("数据存储", "本地 SQLite + AES-256 加密")),
                 Row(kind: .detail("密钥保护", "iOS Keychain")),
                 Row(kind: .detail("隐私说明", "数据不出设备，iCloud 走私有库"))
@@ -108,8 +108,11 @@ final class SettingsViewController: UITableViewController {
     private func keyboardStatusText() -> String {
         let env = RuntimeEnvironment.shared
         if !env.systemExtensionsAvailable { return "容器内不可用" }
-        if env.keyboardEverActivated { return "已启用" }
-        return "未检测到"
+        switch env.keyboardFullAccessGranted {
+        case .some(true): return "已启用"
+        case .some(false): return "已添加，未开完全访问"
+        case .none: return "未检测到"
+        }
     }
 
     private func backgroundRefreshText() -> String {

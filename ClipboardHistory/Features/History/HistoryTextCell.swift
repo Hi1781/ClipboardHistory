@@ -11,6 +11,23 @@ import ClipKit
 final class HistoryTextCell: UITableViewCell {
     static let reuseID = "HistoryTextCell"
 
+    /// 点击右侧箭头的回调（与点整行复制区分开）
+    var onTapAccessory: (() -> Void)?
+
+    private lazy var accessoryButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.setImage(UIImage(systemName: "chevron.right",
+                           withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)),
+                   for: .normal)
+        b.tintColor = .tertiaryLabel
+        b.frame = CGRect(x: 0, y: 0, width: 44, height: 44)   // 放大点击热区
+        b.contentHorizontalAlignment = .right
+        b.addTarget(self, action: #selector(accessoryTapped), for: .touchUpInside)
+        return b
+    }()
+
+    @objc private func accessoryTapped() { onTapAccessory?() }
+
     private let previewLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -67,7 +84,7 @@ final class HistoryTextCell: UITableViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func setupLayout() {
-        accessoryType = .disclosureIndicator
+        accessoryView = accessoryButton
         contentView.addSubview(typeIcon)
         contentView.addSubview(previewLabel)
         contentView.addSubview(timeLabel)

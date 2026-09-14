@@ -1,6 +1,13 @@
 # 更新日志 / Changelog
 
-## v2.3.0（当前版本）—— 修复键盘塌陷/读不到历史 + 打通 App Group 共享
+## v2.4.0（当前版本）—— 键盘等高再修正 + 键盘状态检测修复 + 词条文本编辑
+- 优化（键盘高度）：高度改为「屏幕比例 + 保底值」动态计算并整体补足一截（iPhone 竖屏保底 302、横屏 206；iPad 竖屏保底 360、横屏 300），各机型/方向都与系统官方键盘等高，不再矮一截
+- 修复（键盘扩展一直「未检测到」）：心跳改为键盘进程出现即写（不再被早期 hasFullAccess=false 跳过），viewDidAppear 再补报一次，并对共享 UserDefaults 显式 synchronize 跨进程落盘；新增完全访问标记，设置页状态细分为「已启用 / 已添加，未开完全访问 / 未检测到」
+- 新增（词条编辑）：点列表词条右侧箭头弹出文本编辑窗口，底部两个动作——「保存（替换原词条）」原地更新（保留 id/标签/置顶，时间刷新重排），「另存为新词条」保留原条并新增编辑后的记录；实时字数统计、未改动时替换按钮置灰、键盘弹起按钮条自动上移
+- 交互：右侧箭头改为独立可点按钮（放大点击热区），点整行仍是复制，二者互不误触；图片点箭头查看大图
+- 版本 2.4.0 (build 7)
+
+## v2.3.0 —— 修复键盘塌陷/读不到历史 + 打通 App Group 共享
 - 修复（键盘塌陷，iPad 实测）：键盘高度改用 `view.heightAnchor` 约束固定（替代在 iPad 不可靠的 preferredContentSize），并在 viewDidAppear/布局/旋转时持续校正；无论是否有历史记录都与系统官方键盘等高（iPhone 竖屏 291 / 横屏 204，iPad 竖屏 320 / 横屏 264），空状态显示提示但不收缩
 - 修复（iPad 顶部多余助理条）：viewDidLoad 清空 inputAssistantItem 的 leading/trailingBarButtonGroups，去掉系统撤销/重做/粘贴条与自定义 UI 重叠
 - 修复（键盘读不到主 App 历史、设置显示「键盘扩展 未检测到」）：根因是裸二进制 ad-hoc 签名未带 entitlements，SideStore 重签后 App Group 不生效，主 App 与键盘各自沙盒。现用 ldid 把 `com.apple.security.application-groups` 嵌入主 App 与三个扩展的签名，设备端重签后保留，共享容器/UserDefaults/心跳全部打通

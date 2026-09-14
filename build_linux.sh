@@ -24,7 +24,7 @@ set -euo pipefail
 APP_NAME="ClipboardHistory"
 DEPLOY="16.0"; SDK_VER="16.4"
 TARGET="arm64-apple-ios${DEPLOY}"
-MARK_VER="2.3.0"; CUR_VER="6"
+MARK_VER="2.4.0"; CUR_VER="7"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${ROOT}/build-linux"
 APP="${BUILD}/Payload/${APP_NAME}.app"

@@ -18,15 +18,21 @@ final class KeyboardViewController: UIInputViewController {
     private var heightConstraint: NSLayoutConstraint?
     private var currentHeight: CGFloat = 0
 
-    /// 按设备与方向给出与系统键盘一致的高度
+    /// 按设备与方向给出与系统官方键盘等高的高度。
+    /// 采用「屏幕比例 + 保底值」覆盖各机型与 iPad，避免固定值在部分设备矮一截。
     private func desiredKeyboardHeight() -> CGFloat {
         let idiom = UIDevice.current.userInterfaceIdiom
         let size = view.window?.windowScene?.screen.bounds.size ?? UIScreen.main.bounds.size
         let landscape = size.width > size.height
+        let h = size.height
         if idiom == .pad {
-            return landscape ? 264 : 320   // iPad 官方键盘高度
+            let ratio = landscape ? h * 0.37 : h * 0.335
+            let floorV: CGFloat = landscape ? 300 : 360
+            return max(ratio, floorV).rounded()
         } else {
-            return landscape ? 204 : 291   // iPhone 竖屏 291（含候选条）
+            let ratio = landscape ? h * 0.44 : h * 0.39
+            let floorV: CGFloat = landscape ? 206 : 302
+            return max(ratio, floorV).rounded()
         }
     }
 
@@ -163,6 +169,8 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installKeyboardHeight()
+        // 此刻 hasFullAccess 已稳定，再补一次心跳，避免早期为 false 漏报导致主 App「未检测到」
+        RuntimeEnvironment.shared.reportKeyboardHeartbeat(fullAccess: hasFullAccess)
     }
 
     override func viewWillLayoutSubviews() {

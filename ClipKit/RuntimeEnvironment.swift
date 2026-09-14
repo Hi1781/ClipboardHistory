@@ -120,22 +120,32 @@ public final class RuntimeEnvironment {
 
     // MARK: - 键盘心跳（主 App 据此判断键盘扩展是否已启用并授予完全访问）
 
-    /// 键盘扩展每次以「完全访问」状态出现时上报心跳
+    /// 键盘扩展每次出现时上报心跳：运行标记无论是否完全访问都写，另记完全访问标记。
+    /// 跨进程共享需显式 synchronize 落盘，否则主 App 可能读不到键盘进程刚写的值。
     public func reportKeyboardHeartbeat(fullAccess: Bool) {
-        guard fullAccess else { return }
-        defaults.set(Date().timeIntervalSince1970,
-                     forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
+        let d = defaults
+        d.set(Date().timeIntervalSince1970, forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
+        d.set(fullAccess, forKey: AppGroupConfig.DefaultsKey.keyboardFullAccess)
+        d.synchronize()
     }
 
     /// 是否曾检测到键盘扩展成功运行（无法在主 App 直接枚举自定义键盘，故用心跳推断）
     public var keyboardEverActivated: Bool {
-        let ts = defaults.double(forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
-        return ts > 0
+        let d = defaults; d.synchronize()
+        return d.double(forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat) > 0
+    }
+
+    /// 最近一次键盘出现时是否已授予完全访问（键盘从未运行为 nil）
+    public var keyboardFullAccessGranted: Bool? {
+        let d = defaults; d.synchronize()
+        guard d.double(forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat) > 0 else { return nil }
+        return d.bool(forKey: AppGroupConfig.DefaultsKey.keyboardFullAccess)
     }
 
     /// 最近一次键盘心跳距现在的秒数（从未运行为 nil）
     public func keyboardHeartbeatAge() -> TimeInterval? {
-        let ts = defaults.double(forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
+        let d = defaults; d.synchronize()
+        let ts = d.double(forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
         guard ts > 0 else { return nil }
         return Date().timeIntervalSince1970 - ts
     }

@@ -133,6 +133,17 @@ public final class ClipStore {
         return true
     }
 
+    /// 用编辑后的文本「原地替换」某条记录（保留 id 与标签/置顶等元数据）
+    public func replaceText(id: UUID, edited: String) {
+        guard let current = item(id: id), current.text != nil else { return }
+        let replaced = current.replacingText(edited)
+        mutate { db, items in
+            db.upsert(replaced)
+            if let idx = items.firstIndex(where: { $0.id == id }) { items[idx] = replaced }
+            items = items.sortedForDisplay()
+        }
+    }
+
     public func delete(id: UUID) {
         mutate { db, items in
             db.delete(id: id)

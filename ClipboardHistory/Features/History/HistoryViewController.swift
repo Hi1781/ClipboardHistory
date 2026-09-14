@@ -312,10 +312,12 @@ extension HistoryViewController: UITableViewDataSource, UITableViewDelegate {
         if item.type == .image {
             let cell = tableView.dequeueReusableCell(withIdentifier: HistoryImageCell.reuseID, for: indexPath) as! HistoryImageCell
             cell.configure(with: item)
+            cell.onTapAccessory = { [weak self] in self?.presentImagePreview(for: item) }
             return cell
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: HistoryTextCell.reuseID, for: indexPath) as! HistoryTextCell
         cell.configure(with: item)
+        cell.onTapAccessory = { [weak self] in self?.presentTextEditor(for: item) }
         return cell
     }
 
@@ -402,6 +404,39 @@ extension HistoryViewController: UITableViewDataSource, UITableViewDelegate {
               let item = ClipStore.shared.item(id: id) else { return }
         animator.addCompletion { [weak self] in self?.copyItem(item) }
     }
+
+    /// 点右侧箭头：弹出文本编辑（保存替换 / 另存为新词条）
+    private func presentTextEditor(for item: ClipItem) {
+        guard item.text != nil else { presentImagePreview(for: item); return }
+        let editor = ClipTextEditorViewController(
+            item: item,
+            onReplace: { [weak self] edited in
+                ClipStore.shared.replaceText(id: item.id, edited: edited)
+                self?.reloadData()
+                self?.showToast("已替换原词条")
+            },
+            onSaveAs: { [weak self] edited in
+                let newItem = ClipItem.makeText(edited, sourceApp: "edited")
+                ClipStore.shared.add(newItem)
+                self?.reloadData()
+                self?.showToast("已另存为新词条")
+            })
+        let nav = UINavigationController(rootViewController: editor)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+
+    /// 点图片右侧箭头：查看大图
+    private func presentImagePreview(for item: ClipItem) {
+        let vc = ClipPreviewViewController(item: item)
+        vc.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done, target: self, action: #selector(dismissPresented))
+        let nav = UINavigationController(rootViewController: vc)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+
+    @objc private func dismissPresented() { dismiss(animated: true) }
 
     private func shareItem(_ item: ClipItem) {
         var activityItems: [Any] = []

@@ -39,7 +39,8 @@ public enum AppGroupConfig {
         public static let widgetLatestTime = "widgetLatestTime"
         // v2.1 权限引导 / 键盘心跳
         public static let onboardingCompleted = "onboardingCompleted.v2_1"
-        public static let keyboardHeartbeat = "keyboard.fullAccessHeartbeat"
+        public static let keyboardHeartbeat = "keyboard.seenHeartbeat"        // 键盘进程出现即写（不依赖完全访问）
+        public static let keyboardFullAccess = "keyboard.fullAccessFlag"      // 最近一次键盘是否已授予完全访问
         // v2.2 六大捕获路径开关
         public static let pipKeepAliveEnabled = "pipKeepAliveEnabled"        // 路径1 PiP 轮询
         public static let audioKeepAliveEnabled = "audioKeepAliveEnabled"    // 路径2 静音音频保活
