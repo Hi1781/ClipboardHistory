@@ -75,6 +75,10 @@ final class ClipDatabase {
         }
         execute("PRAGMA journal_mode = WAL;")
         execute("PRAGMA foreign_keys = ON;")
+        // 主 App 与键盘扩展是两个进程并发访问同一文件：
+        // busy_timeout 让读在另一进程写时等待而非立刻 SQLITE_BUSY 返回空
+        execute("PRAGMA busy_timeout = 5000;")
+        execute("PRAGMA synchronous = NORMAL;")
         // 多语句建表
         if sqlite3_exec(db, schema, nil, nil, nil) != SQLITE_OK {
             _ = lastError()

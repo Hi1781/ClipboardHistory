@@ -23,6 +23,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // 启动时执行一次同步与清理
         ClipStore.shared.reloadSync()
         scheduleRoutinePurge()
+        // 键盘扩展写入共享库后，经 Darwin 通知主 App 从磁盘重载并刷新 UI
+        CrossProcessNotifier.startObserving {
+            ClipStore.shared.reloadSync()
+            NotificationCenter.default.post(name: ClipStore.didChangeNotification, object: nil)
+        }
         return true
     }
 

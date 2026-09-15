@@ -89,6 +89,7 @@ final class HistoryViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        ClipStore.shared.reloadSync()   // 拾取键盘扩展在另一进程写入的记录
         reloadData()
     }
 
@@ -191,6 +192,7 @@ final class HistoryViewController: UIViewController {
     // MARK: - Actions
 
     @objc private func handleAppActive() {
+        ClipStore.shared.reloadSync()
         let result = PasteboardSync.shared.performSync()
         showSyncBanner(result: result)
         reloadData()

@@ -1,6 +1,13 @@
 # 更新日志 / Changelog
 
-## v2.4.0（当前版本）—— 键盘等高再修正 + 键盘状态检测修复 + 词条文本编辑
+## v2.5.0（当前版本）—— 修复键盘→App 单向不同步 + 键盘状态检测加固
+- 修复（键盘写入同步不到 App）：根因是主 App 的 ClipStore 内存缓存只在启动时读一次磁盘，回到前台时 performSync 因 changeCount 未变直接返回，键盘扩展在另一进程写入共享 SQLite 的记录永远进不了缓存。现主 App 在启动、sceneDidBecomeActive、列表 viewWillAppear/handleAppActive 都先 `reloadSync()` 从共享磁盘重载
+- 新增跨进程 Darwin 通知（CrossProcessNotifier）：键盘每次写入共享库后即时广播，主 App 收到即在主线程 reloadSync 并刷新列表，无需切后台也能近实时同步
+- 数据库：加 `PRAGMA busy_timeout=5000`，主 App 与键盘两进程并发访问同一 SQLite 时读等待写，避免偶发 SQLITE_BUSY 读到空
+- 修复（键盘扩展一直「未检测到」）：心跳改为「共享容器文件 keyboard-status.json 为准、UserDefaults 为辅」双通道并原子写入，规避 NSUserDefaults(suiteName) 跨进程偏好缓存不刷新；主 App 读取优先文件
+- 版本 2.5.0 (build 8)
+
+## v2.4.0 —— 键盘等高再修正 + 键盘状态检测修复 + 词条文本编辑
 - 优化（键盘高度）：高度改为「屏幕比例 + 保底值」动态计算并整体补足一截（iPhone 竖屏保底 302、横屏 206；iPad 竖屏保底 360、横屏 300），各机型/方向都与系统官方键盘等高，不再矮一截
 - 修复（键盘扩展一直「未检测到」）：心跳改为键盘进程出现即写（不再被早期 hasFullAccess=false 跳过），viewDidAppear 再补报一次，并对共享 UserDefaults 显式 synchronize 跨进程落盘；新增完全访问标记，设置页状态细分为「已启用 / 已添加，未开完全访问 / 未检测到」
 - 新增（词条编辑）：点列表词条右侧箭头弹出文本编辑窗口，底部两个动作——「保存（替换原词条）」原地更新（保留 id/标签/置顶，时间刷新重排），「另存为新词条」保留原条并新增编辑后的记录；实时字数统计、未改动时替换按钮置灰、键盘弹起按钮条自动上移

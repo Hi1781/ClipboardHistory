@@ -275,6 +275,8 @@ public final class ClipStore {
     }
 
     private func postChange() {
+        // 通知其它进程（如主 App）共享库已被本进程（如键盘）写入
+        CrossProcessNotifier.post()
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
         }

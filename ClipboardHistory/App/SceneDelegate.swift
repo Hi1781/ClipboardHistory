@@ -41,6 +41,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
+        // 先从共享磁盘重载，拾取键盘扩展在另一进程写入的记录（修复键盘→App 不同步）
+        ClipStore.shared.reloadSync()
         NotificationCenter.default.post(name: .appDidBecomeActive, object: nil)
         // 路径6：进入前台立即双向同步（有则入库，空则按设置回填）
         _ = PasteboardSync.shared.performSync(sourceApp: "become-active")
