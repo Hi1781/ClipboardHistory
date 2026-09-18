@@ -56,10 +56,13 @@ public final class RuntimeEnvironment {
             return .liveContainer
         }
 
-        // 信号 3：Bundle 位于 LiveContainer 的应用/共享容器路径下
+        // 信号 3：Bundle 或主目录位于 LiveContainer 的应用/数据容器路径下（大小写不敏感）
         let bundlePath = Bundle.main.bundlePath
-        let markers = ["/LiveContainer/", "/Documents/Applications/", "/LiveContainer/Applications/"]
-        if markers.contains(where: { bundlePath.contains($0) }) {
+        let homePath = NSHomeDirectory()
+        let markers = ["/LiveContainer/", "/Documents/Applications/", "/LiveContainer/Applications/",
+                       "/Data/Applications/", "/LiveContainer/Data/"]
+        let haystack = (bundlePath + " " + homePath).lowercased()
+        if markers.contains(where: { haystack.contains($0.lowercased()) }) {
             return .liveContainer
         }
 
@@ -130,24 +133,35 @@ public final class RuntimeEnvironment {
     }
 
     private struct KeyboardStatus: Codable { let timestamp: Double; let fullAccess: Bool }
+    private static let metaKey = "keyboard.status"
 
     /// 键盘扩展每次出现时上报心跳：运行标记无论是否完全访问都写，另记完全访问标记。
     public func reportKeyboardHeartbeat(fullAccess: Bool) {
         let now = Date().timeIntervalSince1970
-        // 通道1：共享容器文件（权威，原子写入）
         let status = KeyboardStatus(timestamp: now, fullAccess: fullAccess)
+        // 通道1：共享 SQLite meta（与历史同一文件、同一已验证共享通道，最可靠）
+        if let data = try? JSONEncoder().encode(status),
+           let json = String(data: data, encoding: .utf8) {
+            ClipDatabase.shared.setMeta(json, for: RuntimeEnvironment.metaKey)
+        }
+        // 通道2：共享容器文件（原子写入）
         if let data = try? JSONEncoder().encode(status) {
             try? data.write(to: keyboardStatusFile, options: .atomic)
         }
-        // 通道2：共享 UserDefaults（兜底）
+        // 通道3：共享 UserDefaults（兜底）
         let d = defaults
         d.set(now, forKey: AppGroupConfig.DefaultsKey.keyboardHeartbeat)
         d.set(fullAccess, forKey: AppGroupConfig.DefaultsKey.keyboardFullAccess)
         d.synchronize()
     }
 
-    /// 读取键盘状态：优先共享文件，缺失时回退 UserDefaults（键盘从未运行为 nil）
+    /// 读取键盘状态：优先共享 SQLite meta，再共享文件，最后 UserDefaults（键盘从未运行为 nil）
     private func readKeyboardStatus() -> KeyboardStatus? {
+        if let json = ClipDatabase.shared.getMeta(RuntimeEnvironment.metaKey),
+           let data = json.data(using: .utf8),
+           let s = try? JSONDecoder().decode(KeyboardStatus.self, from: data) {
+            return s
+        }
         if let data = try? Data(contentsOf: keyboardStatusFile),
            let s = try? JSONDecoder().decode(KeyboardStatus.self, from: data) {
             return s

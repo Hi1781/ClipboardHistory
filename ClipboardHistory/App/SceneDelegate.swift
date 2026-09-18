@@ -56,6 +56,17 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // 路径2：退到后台时，若用户开启，则用静音音频保活并低频轮询
         SilentAudioKeepAlive.shared.start()
     }
+
+    /// 键盘扩展「在 App 中编辑」：clipboardhistory://edit/<uuid>
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let url = URLContexts.first?.url,
+              url.scheme == "clipboardhistory",
+              url.host == "edit",
+              let idString = url.pathComponents.last,
+              let nav = window?.rootViewController as? UINavigationController,
+              let history = nav.viewControllers.first as? HistoryViewController else { return }
+        history.openItemForEditing(idString: idString)
+    }
 }
 
 extension Notification.Name {

@@ -389,6 +389,28 @@ final class KeyboardViewController: UIInputViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: w)
     }
 
+    /// 长按菜单：删除该条共享记录并刷新
+    private func deleteItem(_ item: ClipItem) {
+        ClipStore.shared.delete(id: item.id)
+        HapticHelper.warning()
+        reloadData()
+        showToast("已删除")
+    }
+
+    /// 长按菜单：跳转主 App 打开该条文本编辑（沿响应链 openURL，键盘扩展无 UIApplication.shared）
+    private func openEditorInHostApp(id: UUID) {
+        guard let url = URL(string: "clipboardhistory://edit/\(id.uuidString)") else { return }
+        let sel = NSSelectorFromString("openURL:")
+        var r: UIResponder? = self
+        while let cur = r {
+            if cur.responds(to: sel) {
+                _ = cur.perform(sel, with: url)
+                return
+            }
+            r = cur.next
+        }
+    }
+
     /// 仅未授权遮罩使用：沿响应链打开本 App 系统设置
     private func openHostSettings() {
         let sel = NSSelectorFromString("openURL:")
@@ -421,10 +443,24 @@ extension KeyboardViewController: UITableViewDataSource, UITableViewDelegate {
                    contextMenuConfigurationForRowAt indexPath: IndexPath,
                    point: CGPoint) -> UIContextMenuConfiguration? {
         let item = visibleItems[indexPath.row]
+        let isStored = storedItems.contains(where: { $0.id == item.id })
         return UIContextMenuConfiguration(identifier: indexPath as NSCopying, previewProvider: nil) { [weak self] _ in
             let insert = UIAction(title: "复制并插入", image: UIImage(systemName: "text.cursor")) { _ in self?.copyAndInsert(item) }
             let copy = UIAction(title: "仅复制", image: UIImage(systemName: "doc.on.doc")) { _ in self?.copyOnly(item) }
-            return UIMenu(title: "", children: [insert, copy])
+            var children: [UIMenuElement] = [insert, copy]
+            // 仅文本且为已入库记录可跳主 App 编辑
+            if isStored, item.text != nil {
+                let edit = UIAction(title: "在 App 中编辑", image: UIImage(systemName: "square.and.pencil")) { _ in
+                    self?.openEditorInHostApp(id: item.id)
+                }
+                children.append(edit)
+            }
+            if isStored {
+                let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"),
+                                      attributes: .destructive) { _ in self?.deleteItem(item) }
+                children.append(UIMenu(options: .displayInline, children: [delete]))
+            }
+            return UIMenu(title: "", children: children)
         }
     }
 }

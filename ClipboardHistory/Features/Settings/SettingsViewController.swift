@@ -40,7 +40,14 @@ final class SettingsViewController: UITableViewController {
         title = "设置"
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .done, target: self, action: #selector(dismissSelf))
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(pipStateChanged),
+            name: .pipKeepAliveStateChanged, object: nil)
         buildModel()
+    }
+
+    @objc private func pipStateChanged() {
+        buildModel(); tableView.reloadData()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -64,7 +71,7 @@ final class SettingsViewController: UITableViewController {
             (.permission, [
                 Row(kind: .action("查看权限与使用引导", .systemIndigo)),
                 Row(kind: .detail("运行模式", env.modeDisplayName)),
-                Row(kind: .detail("键盘扩展", keyboardStatusText())),
+                Row(kind: .action("键盘扩展：\(keyboardStatusText())", keyboardStatusColor())),
                 Row(kind: .detail("后台 App 刷新", backgroundRefreshText()))
             ]),
             (.sync, [
@@ -97,7 +104,7 @@ final class SettingsViewController: UITableViewController {
                 Row(kind: .action("管理全部标签", .systemBlue))
             ]),
             (.about, [
-                Row(kind: .detail("版本", "2.5.0")),
+                Row(kind: .detail("版本", "2.6.0")),
                 Row(kind: .detail("数据存储", "本地 SQLite + AES-256 加密")),
                 Row(kind: .detail("密钥保护", "iOS Keychain")),
                 Row(kind: .detail("隐私说明", "数据不出设备，iCloud 走私有库"))
@@ -107,11 +114,39 @@ final class SettingsViewController: UITableViewController {
 
     private func keyboardStatusText() -> String {
         let env = RuntimeEnvironment.shared
-        if !env.systemExtensionsAvailable { return "容器内不可用" }
+        if env.isLiveContainer { return "LiveContainer 不支持（点此查看）" }
         switch env.keyboardFullAccessGranted {
         case .some(true): return "已启用"
         case .some(false): return "已添加，未开完全访问"
-        case .none: return "未检测到"
+        case .none: return "未检测到（点此查看）"
+        }
+    }
+
+    private func keyboardStatusColor() -> UIColor {
+        let env = RuntimeEnvironment.shared
+        if env.isLiveContainer { return .systemOrange }
+        switch env.keyboardFullAccessGranted {
+        case .some(true): return .systemGreen
+        default: return .systemOrange
+        }
+    }
+
+    private func showKeyboardGuide() {
+        let env = RuntimeEnvironment.shared
+        if env.isLiveContainer {
+            showAlert(title: "LiveContainer 无法使用键盘扩展",
+                      message: "LiveContainer 官方限制：容器内的 App 不能注册自定义键盘 / Widget（需要额外 App ID）。\n\n如需在系统键盘里查看历史，请用 SideStore / AltStore 直装本 IPA（不要放进 LiveContainer），再到：设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → 选「剪贴板」，并打开「允许完全访问」。")
+            return
+        }
+        switch env.keyboardFullAccessGranted {
+        case .some(true):
+            showAlert(title: "键盘扩展已启用", message: "在任意输入框长按地球键切换到「剪贴板」键盘即可查看历史、一键复制。\n若刚重装仍显示旧状态，唤起一次键盘后回到本页会自动刷新。")
+        case .some(false):
+            showAlert(title: "请开启完全访问",
+                      message: "设置 → 通用 → 键盘 → 键盘 → 剪贴板 → 打开「允许完全访问」。\n未开完全访问时键盘无法读取共享历史。")
+        case .none:
+            showAlert(title: "尚未检测到键盘",
+                      message: "1. 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → 选「剪贴板」\n2. 点开「剪贴板」→ 打开「允许完全访问」\n3. 到任意输入框切换到该键盘一次，再回到本 App，状态会自动变为「已启用」。")
         }
     }
 
@@ -177,6 +212,7 @@ final class SettingsViewController: UITableViewController {
         let rowIndex = indexPath.row
         switch (section, rowIndex) {
         case (.permission, 0): showOnboarding()
+        case (.permission, 2): showKeyboardGuide()
         case (.background, 2): startPiPNow()
         case (.storage, 0): showAutoDeletePicker()
         case (.storage, 1): showMaxRecordPicker()
@@ -231,8 +267,15 @@ final class SettingsViewController: UITableViewController {
         AppGroupConfig.sharedDefaults?.set(true, forKey: AppGroupConfig.DefaultsKey.pipKeepAliveEnabled)
         let ok = PiPKeepAlive.shared.startPiP()
         if !ok {
-            showAlert(title: "暂时无法开启画中画",
-                      message: "请先在任意页面播放过视频或稍后再试；开启后保持小窗显示即可在后台轮询剪贴板")
+            showAlert(title: "无法开启画中画",
+                      message: "当前设备不支持画中画，或视频资源缺失。请改用静音音频 / 键盘 / 前台同步等其它捕获路径。")
+        } else {
+            // KVO 会在视频就绪后自动弹出悬浮小窗；回到主界面上滑回桌面小窗即常驻
+            showAlert(title: "画中画已启动",
+                      message: "屏幕角落会出现一个黑色小悬浮窗（属正常现象）。保持小窗显示即可在后台每 1.5 秒轮询并自动入库；若未立即出现，停留本页 1–2 秒会自动弹出。")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.buildModel(); self?.tableView.reloadData()
         }
         buildModel(); tableView.reloadData()
     }

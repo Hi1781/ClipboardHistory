@@ -74,6 +74,17 @@
 			</array>
 		</dict>
 	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.clipboard.history.url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>clipboardhistory</string>
+			</array>
+		</dict>
+	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.clipboard.history.refresh</string>

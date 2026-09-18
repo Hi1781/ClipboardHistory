@@ -45,6 +45,10 @@ final class ClipDatabase {
     CREATE INDEX IF NOT EXISTS idx_clips_timestamp ON clips(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash);
     CREATE INDEX IF NOT EXISTS idx_clips_pinned ON clips(is_pinned);
+    CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    );
     """
 
     private init() {
@@ -106,6 +110,33 @@ final class ClipDatabase {
             }
             defer { sqlite3_finalize(statement) }
             return sqlite3_step(statement) == SQLITE_DONE
+        }
+    }
+
+    // MARK: - 元数据键值（跨进程心跳等，与历史共用同一共享文件，最可靠）
+
+    func setMeta(_ value: String, for key: String) {
+        queue.sync {
+            var statement: OpaquePointer?
+            let sql = "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?);"
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(statement, 2, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_step(statement)
+        }
+    }
+
+    func getMeta(_ key: String) -> String? {
+        queue.sync {
+            var statement: OpaquePointer?
+            let sql = "SELECT value FROM meta WHERE key = ?;"
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            if let c = sqlite3_column_text(statement, 0) { return String(cString: c) }
+            return nil
         }
     }
 

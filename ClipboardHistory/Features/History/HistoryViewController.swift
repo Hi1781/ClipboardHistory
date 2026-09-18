@@ -407,8 +407,21 @@ extension HistoryViewController: UITableViewDataSource, UITableViewDelegate {
         animator.addCompletion { [weak self] in self?.copyItem(item) }
     }
 
+    /// 供键盘扩展「在 App 中编辑」经 URL scheme 跳转调用
+    func openItemForEditing(idString: String) {
+        ClipStore.shared.reloadSync()
+        guard let id = UUID(uuidString: idString),
+              let item = ClipStore.shared.item(id: id), item.text != nil else { return }
+        reloadData()
+        if presentedViewController != nil {
+            dismiss(animated: true) { self.presentTextEditor(for: item) }
+        } else {
+            presentTextEditor(for: item)
+        }
+    }
+
     /// 点右侧箭头：弹出文本编辑（保存替换 / 另存为新词条）
-    private func presentTextEditor(for item: ClipItem) {
+    func presentTextEditor(for item: ClipItem) {
         guard item.text != nil else { presentImagePreview(for: item); return }
         let editor = ClipTextEditorViewController(
             item: item,

@@ -1,6 +1,14 @@
 # 更新日志 / Changelog
 
-## v2.5.0（当前版本）—— 修复键盘→App 单向不同步 + 键盘状态检测加固
+## v2.6.0（当前版本）—— 键盘检测三通道 + 长按删除/跳转编辑 + 画中画小窗修复
+- 键盘检测（LiveContainer 专项）：官方限制 LiveContainer 容器内 App 不能注册自定义键盘/Widget（需额外 App ID）。增强容器识别（Bundle 与主目录路径双信号），设置中明确区分「已启用 / 未开完全访问 / 未检测到 / LiveContainer 不支持」，键盘状态行可点查看分步引导
+- 键盘心跳升级为三通道：优先写入与历史同一个共享 SQLite 的 meta 表（已验证可共享的通道，最可靠），再写共享容器文件与 UserDefaults 兜底，修复标准安装下仍偶发「未检测到」
+- 键盘长按菜单新增「删除」（删共享记录并刷新）与「在 App 中编辑」（经 clipboardhistory://edit/<id> 跳转主 App 打开编辑弹窗）；点按复制/复制并插入保留，正常点按不跳转
+- 修复画中画点了不出小窗：改用 AVQueuePlayer + AVPlayerLooper 无缝循环（避免结尾 seek 打断 PiP），KVO 监听 isPictureInPicturePossible，视频未就绪时在就绪瞬间自动发起；提前激活 .playback 音频会话；设置页实时刷新画中画状态
+- 新增 URL scheme：clipboardhistory://edit/<uuid>
+- 版本 2.6.0 (build 9)
+
+## v2.5.0 —— 修复键盘→App 单向不同步 + 键盘状态检测加固
 - 修复（键盘写入同步不到 App）：根因是主 App 的 ClipStore 内存缓存只在启动时读一次磁盘，回到前台时 performSync 因 changeCount 未变直接返回，键盘扩展在另一进程写入共享 SQLite 的记录永远进不了缓存。现主 App 在启动、sceneDidBecomeActive、列表 viewWillAppear/handleAppActive 都先 `reloadSync()` 从共享磁盘重载
 - 新增跨进程 Darwin 通知（CrossProcessNotifier）：键盘每次写入共享库后即时广播，主 App 收到即在主线程 reloadSync 并刷新列表，无需切后台也能近实时同步
 - 数据库：加 `PRAGMA busy_timeout=5000`，主 App 与键盘两进程并发访问同一 SQLite 时读等待写，避免偶发 SQLITE_BUSY 读到空
