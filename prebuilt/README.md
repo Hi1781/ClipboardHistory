@@ -1,8 +1,8 @@
 # 预编译裸 IPA（未签名）
 
-- 文件：ClipboardHistory-2.6.0-raw-unsigned.ipa
-- 大小： 566K
-- SHA-256：`26d5064a5068374f402b1ddc499cb3b65a48134f1062ecd4e61d887f3ea98789`
+- 文件：ClipboardHistory-2.6.1-raw-unsigned.ipa
+- 大小： 567K
+- SHA-256：`a8725fff0604a5a49fe96732d24392827d74f92cb42c00be2d303e8568c53db7`
 - 架构：arm64（iPhone / iPad，最低 iOS 16）
 - 状态：**未签名、无 embedded.mobileprovision、无 _CodeSignature**，为 raw 裸包；
   但 4 个可执行文件已用 ldid 把 App Group entitlements 嵌入 ad-hoc 签名，

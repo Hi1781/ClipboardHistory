@@ -254,8 +254,11 @@ public final class ClipStore {
         }
     }
 
-    /// 同步重载（键盘 viewWillAppear 需要立即拿到数据）
+    /// 同步重载（主 App 回前台 / 键盘出现时调用）。
+    /// 先重开 SQLite 连接丢弃跨进程读快照，再从磁盘全量读取，
+    /// 确保拿到键盘扩展在另一进程已落盘的写入。
     public func reloadSync() {
+        database.reopen()
         queue.sync(flags: .barrier) { [weak self] in
             guard let self else { return }
             self.cachedItems = self.database.fetchAll()

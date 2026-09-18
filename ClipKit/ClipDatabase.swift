@@ -77,12 +77,14 @@ final class ClipDatabase {
             db = nil
             return
         }
-        execute("PRAGMA journal_mode = WAL;")
+        // 用 DELETE 回滚日志而非 WAL：主 App 与键盘是两个独立进程，WAL 的
+        // -wal/-shm 跨进程快照在自签重签环境下可能让长连接读不到另一进程的提交；
+        // DELETE 模式每次提交都完整落进主 .sqlite，任一进程新读事务必见最新数据。
+        execute("PRAGMA journal_mode = DELETE;")
         execute("PRAGMA foreign_keys = ON;")
-        // 主 App 与键盘扩展是两个进程并发访问同一文件：
         // busy_timeout 让读在另一进程写时等待而非立刻 SQLITE_BUSY 返回空
         execute("PRAGMA busy_timeout = 5000;")
-        execute("PRAGMA synchronous = NORMAL;")
+        execute("PRAGMA synchronous = FULL;")
         // 多语句建表
         if sqlite3_exec(db, schema, nil, nil, nil) != SQLITE_OK {
             _ = lastError()
@@ -93,6 +95,15 @@ final class ClipDatabase {
         if db != nil {
             sqlite3_close(db)
             db = nil
+        }
+    }
+
+    /// 关闭并重开连接：彻底丢弃任何进程内读快照，保证看到另一进程（键盘）已落盘的提交。
+    /// 由主 App 回到前台 / 列表出现时调用，频率低、开销可忽略。
+    func reopen() {
+        queue.sync {
+            close()
+            open()
         }
     }
 

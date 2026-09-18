@@ -1,6 +1,13 @@
 # 更新日志 / Changelog
 
-## v2.6.0（当前版本）—— 键盘检测三通道 + 长按删除/跳转编辑 + 画中画小窗修复
+## v2.6.1（当前版本）—— 根治 SideStore 直装下键盘→App 不同步
+- 共享数据库日志由 WAL 改为 DELETE 回滚日志：WAL 的 -wal/-shm 跨进程读快照在自签重签环境会让主 App 长连接读不到键盘扩展进程的提交；DELETE 模式每次提交完整落进主 .sqlite，任一进程新读事务必见最新
+- 主 App 每次 reloadSync（回前台/列表出现/收 Darwin 通知）前重开 SQLite 连接，彻底丢弃进程内读快照
+- synchronous=FULL 保证键盘写入对另一进程立即可见；busy_timeout 保留避免并发 SQLITE_BUSY
+- 打开旧库时 PRAGMA 自动 checkpoint 并转换，历史数据不丢
+- 版本 2.6.1 (build 10)
+
+## v2.6.0 —— 键盘检测三通道 + 长按删除/跳转编辑 + 画中画小窗修复
 - 键盘检测（LiveContainer 专项）：官方限制 LiveContainer 容器内 App 不能注册自定义键盘/Widget（需额外 App ID）。增强容器识别（Bundle 与主目录路径双信号），设置中明确区分「已启用 / 未开完全访问 / 未检测到 / LiveContainer 不支持」，键盘状态行可点查看分步引导
 - 键盘心跳升级为三通道：优先写入与历史同一个共享 SQLite 的 meta 表（已验证可共享的通道，最可靠），再写共享容器文件与 UserDefaults 兜底，修复标准安装下仍偶发「未检测到」
 - 键盘长按菜单新增「删除」（删共享记录并刷新）与「在 App 中编辑」（经 clipboardhistory://edit/<id> 跳转主 App 打开编辑弹窗）；点按复制/复制并插入保留，正常点按不跳转
