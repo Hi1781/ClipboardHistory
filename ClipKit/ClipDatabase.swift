@@ -53,12 +53,16 @@ final class ClipDatabase {
 
     private init() {
         self.key = KeychainHelper.masterKey()
-        open()
+        // 所有对 db 句柄的访问都串行化到 queue，建连也在 queue 上，避免与重开竞争
+        queue.sync { openLocked() }
     }
 
-    deinit { close() }
+    deinit { sqlite3_close(db) }
 
     // MARK: - 打开 / 建表
+    //
+    // 重要：openLocked()/closeLocked() 假定已运行在 self.queue 上，
+    // 内部绝不能再调用会 queue.sync 的方法，否则同一条串行队列重入 = 死锁。
 
     private func databaseURL() -> URL? {
         // 统一走 RuntimeEnvironment：标准安装用 App Group 共享容器，
@@ -66,7 +70,15 @@ final class ClipDatabase {
         RuntimeEnvironment.shared.databaseURL
     }
 
-    private func open() {
+    /// 直接执行（不分派队列），仅允许在持有 queue 时调用
+    private func execRaw(_ sql: String) {
+        guard db != nil else { return }
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            _ = lastError()
+        }
+    }
+
+    private func openLocked() {
         guard let url = databaseURL() else { return }
         // 保护属性：首次解锁后可访问，磁盘加密
         try? FileManager.default.setAttributes(
@@ -80,18 +92,17 @@ final class ClipDatabase {
         // 用 DELETE 回滚日志而非 WAL：主 App 与键盘是两个独立进程，WAL 的
         // -wal/-shm 跨进程快照在自签重签环境下可能让长连接读不到另一进程的提交；
         // DELETE 模式每次提交都完整落进主 .sqlite，任一进程新读事务必见最新数据。
-        execute("PRAGMA journal_mode = DELETE;")
-        execute("PRAGMA foreign_keys = ON;")
-        // busy_timeout 让读在另一进程写时等待而非立刻 SQLITE_BUSY 返回空
-        execute("PRAGMA busy_timeout = 5000;")
-        execute("PRAGMA synchronous = FULL;")
-        // 多语句建表
-        if sqlite3_exec(db, schema, nil, nil, nil) != SQLITE_OK {
-            _ = lastError()
-        }
+        // busy_timeout 让读在另一进程写时等待而非立刻 SQLITE_BUSY 返回空。
+        execRaw("""
+        PRAGMA journal_mode = DELETE;
+        PRAGMA foreign_keys = ON;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA synchronous = FULL;
+        \(schema)
+        """)
     }
 
-    private func close() {
+    private func closeLocked() {
         if db != nil {
             sqlite3_close(db)
             db = nil
@@ -102,8 +113,8 @@ final class ClipDatabase {
     /// 由主 App 回到前台 / 列表出现时调用，频率低、开销可忽略。
     func reopen() {
         queue.sync {
-            close()
-            open()
+            closeLocked()
+            openLocked()
         }
     }
 

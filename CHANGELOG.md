@@ -1,6 +1,12 @@
 # 更新日志 / Changelog
 
-## v2.6.1（当前版本）—— 根治 SideStore 直装下键盘→App 不同步
+## v2.6.2（当前版本）—— 修复 v2.6.1 启动闪退（数据库队列重入死锁）
+- 紧急修复：v2.6.1 的 reopen() 在数据库串行队列内调用 open()，而 open() 内的 execute() 又对同一串行队列 queue.sync，构成同队列重入死锁，主线程启动即卡死被看门狗杀掉（打开就闪退）
+- 重构连接生命周期：新增仅在持有队列时调用的 openLocked/closeLocked/execRaw（不再二次派队列）；建连与重开都在同一串行队列内原子完成
+- 保留 v2.6.1 的跨进程修复：DELETE 回滚日志、synchronous=FULL、回前台重开连接读到键盘进程已落盘数据
+- 版本 2.6.2 (build 11)
+
+## v2.6.1 —— 根治 SideStore 直装下键盘→App 不同步（该版有启动死锁，已被 2.6.2 取代）
 - 共享数据库日志由 WAL 改为 DELETE 回滚日志：WAL 的 -wal/-shm 跨进程读快照在自签重签环境会让主 App 长连接读不到键盘扩展进程的提交；DELETE 模式每次提交完整落进主 .sqlite，任一进程新读事务必见最新
 - 主 App 每次 reloadSync（回前台/列表出现/收 Darwin 通知）前重开 SQLite 连接，彻底丢弃进程内读快照
 - synchronous=FULL 保证键盘写入对另一进程立即可见；busy_timeout 保留避免并发 SQLITE_BUSY
