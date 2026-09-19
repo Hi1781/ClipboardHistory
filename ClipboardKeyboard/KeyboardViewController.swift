@@ -2,10 +2,11 @@
 //  KeyboardViewController.swift
 //  ClipboardKeyboard
 //
-//  自定义键盘扩展 v2.3
-//  - 与系统键盘等高（heightAnchor 固定，空数据也不塌陷），iPhone / iPad 自适应
-//  - 唤起即双向同步，列表直接展示历史，点按一键复制并插入
-//  - 毛玻璃原生键盘观感；正常浏览/复制路径绝不跳转宿主 App
+//  自定义键盘扩展 v2.7（全面重构，iPhone / iPad 适配）
+//  - 与系统官方键盘严格等高：分设备类型/方向的常量 + 安全区，多时机重算，空数据也不塌陷
+//  - iPad：清掉系统撤销/重做助理条，regular 宽度下内容居中限宽，避免超宽行
+//  - 唤起即重开共享连接读取最新历史，点按一键复制并插入，长按弹出完整菜单
+//  - 正常浏览/复制绝不跳转宿主；仅长按菜单「在 App 中编辑」与未授权「去设置」会 openURL
 //
 
 import UIKit
@@ -16,32 +17,43 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: - 高度（与官方键盘等高，任何状态都不塌陷）
 
     private var heightConstraint: NSLayoutConstraint?
-    private var currentHeight: CGFloat = 0
+    private var lastAppliedHeight: CGFloat = 0
 
-    /// 按设备与方向给出与系统官方键盘等高的高度。
-    /// 采用「屏幕比例 + 保底值」覆盖各机型与 iPad，避免固定值在部分设备矮一截。
+    /// 与系统键盘等高的总高度（含底部 Home 指示条区域），按设备类型/方向取常量。
+    /// 现代全面屏 iPhone 竖屏约 336–342、横屏约 211；非全面屏 260/271、横屏 162；
+    /// iPad 竖屏 313/324、横屏 253/270（12.9 寸略高）。
     private func desiredKeyboardHeight() -> CGFloat {
         let idiom = UIDevice.current.userInterfaceIdiom
-        let size = view.window?.windowScene?.screen.bounds.size ?? UIScreen.main.bounds.size
-        let landscape = size.width > size.height
-        let h = size.height
+        let screen = view.window?.windowScene?.screen.bounds ?? UIScreen.main.bounds
+        let landscape = screen.width > screen.height
+        let longSide = max(screen.width, screen.height)
+
         if idiom == .pad {
-            let ratio = landscape ? h * 0.37 : h * 0.335
-            let floorV: CGFloat = landscape ? 300 : 360
-            return max(ratio, floorV).rounded()
+            // iPad 全宽键盘高度；12.9 寸（长边 1366）略高
+            let isLarge = longSide >= 1366
+            return landscape ? (isLarge ? 270 : 253) : (isLarge ? 324 : 313)
         } else {
-            let ratio = landscape ? h * 0.44 : h * 0.39
-            let floorV: CGFloat = landscape ? 206 : 302
-            return max(ratio, floorV).rounded()
+            // 全面屏（长边 >= 812，含刘海 / Home 指示条）
+            let isModern = longSide >= 812
+            if isModern {
+                if landscape { return 211 }
+                return longSide >= 900 ? 342 : 336
+            } else {
+                if landscape { return 162 }
+                return longSide >= 736 ? 271 : 260
+            }
         }
     }
 
+    /// 安装 / 更新高度约束（priority 999，避免与系统旋转临时约束冲突）
     private func installKeyboardHeight() {
-        let h = desiredKeyboardHeight()
         guard view.bounds.width > 0 else { return }
-        guard abs(h - currentHeight) > 0.5 || heightConstraint == nil else { return }
-        currentHeight = h
-        if let c = heightConstraint { c.constant = h } else {
+        let h = desiredKeyboardHeight()
+        guard abs(h - lastAppliedHeight) > 0.5 || heightConstraint == nil else { return }
+        lastAppliedHeight = h
+        if let c = heightConstraint {
+            c.constant = h
+        } else {
             let c = view.heightAnchor.constraint(equalToConstant: h)
             c.priority = UILayoutPriority(999)
             c.isActive = true
@@ -58,11 +70,14 @@ final class KeyboardViewController: UIInputViewController {
         return v
     }()
 
+    /// iPad 上把功能内容限制在居中的可读宽度内
+    private let bodyContainer = UIView()
+
     // MARK: - 工具栏
 
-    private lazy var toolbar = UIView()
+    private let toolbar = UIView()
 
-    private lazy var titleLabel: UILabel = {
+    private let titleLabel: UILabel = {
         let l = UILabel()
         l.translatesAutoresizingMaskIntoConstraints = false
         l.text = "剪贴历史"
@@ -107,19 +122,20 @@ final class KeyboardViewController: UIInputViewController {
         return s
     }()
 
-    // MARK: - 列表
+    // MARK: - 列表 / 空态 / 未授权
 
     private lazy var tableView: UITableView = {
         let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.delegate = self; tv.dataSource = self
         tv.register(KeyboardHistoryCell.self, forCellReuseIdentifier: KeyboardHistoryCell.reuseID)
-        tv.estimatedRowHeight = 58
+        tv.estimatedRowHeight = 60
         tv.rowHeight = UITableView.automaticDimension
         tv.separatorStyle = .none
         tv.backgroundColor = .clear
-        tv.contentInset = UIEdgeInsets(top: 2, left: 0, bottom: 8, right: 0)
+        tv.contentInset = UIEdgeInsets(top: 2, left: 0, bottom: 6, right: 0)
         tv.keyboardDismissMode = .none
+        tv.showsVerticalScrollIndicator = true
         return tv
     }()
 
@@ -152,7 +168,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // 去掉 iPad 顶部系统撤销/重做/粘贴助理条，避免与自定义 UI 重叠
+        // iPad：去掉顶部系统撤销/重做/粘贴助理条，避免挤压高度或与自定义 UI 重叠
         inputAssistantItem.leadingBarButtonGroups = []
         inputAssistantItem.trailingBarButtonGroups = []
         setupUI()
@@ -163,18 +179,24 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        installKeyboardHeight()
         syncAndReload()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installKeyboardHeight()
-        // 此刻 hasFullAccess 已稳定，再补一次心跳，避免早期为 false 漏报导致主 App「未检测到」
+        // hasFullAccess 此刻已稳定，补一次心跳，避免早期 false 漏报
         RuntimeEnvironment.shared.reportKeyboardHeartbeat(fullAccess: hasFullAccess)
     }
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
+        installKeyboardHeight()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
         installKeyboardHeight()
     }
 
@@ -188,22 +210,34 @@ final class KeyboardViewController: UIInputViewController {
     private func setupUI() {
         view.backgroundColor = .clear
         toolbar.translatesAutoresizingMaskIntoConstraints = false
+        bodyContainer.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(blurView)
         let c = blurView.contentView
+
+        // 工具栏全宽
         c.addSubview(toolbar)
         toolbar.addSubview(globeButton); toolbar.addSubview(titleLabel)
         toolbar.addSubview(searchButton); toolbar.addSubview(dismissButton)
-        c.addSubview(searchBar); c.addSubview(scope)
-        c.addSubview(tableView); c.addSubview(emptyLabel)
+
+        // 功能内容放进居中限宽容器
+        c.addSubview(bodyContainer)
+        bodyContainer.addSubview(searchBar); bodyContainer.addSubview(scope)
+        bodyContainer.addSubview(tableView); bodyContainer.addSubview(emptyLabel)
 
         noAccessView.translatesAutoresizingMaskIntoConstraints = false
         noAccessView.isHidden = true
-        c.addSubview(noAccessView)
+        bodyContainer.addSubview(noAccessView)
 
         tableTopToToolbar = tableView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 2)
         tableTopToScope = tableView.topAnchor.constraint(equalTo: scope.bottomAnchor, constant: 6)
         tableTopToScope.isActive = false
+
+        // body 水平约束：手机填满、iPad 居中限宽（等宽约束用 defaultHigh，可被 760 上限收窄）
+        let bodyLead = bodyContainer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8)
+        let bodyTrail = bodyContainer.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8)
+        bodyLead.priority = .defaultHigh
+        bodyTrail.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             blurView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -234,30 +268,37 @@ final class KeyboardViewController: UIInputViewController {
             searchButton.widthAnchor.constraint(equalToConstant: 38),
             searchButton.heightAnchor.constraint(equalToConstant: 32),
 
-            searchBar.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 4),
-            searchBar.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8),
-            searchBar.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8),
+            // body 容器：竖向铺满工具栏以下；水平居中
+            bodyContainer.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            bodyContainer.bottomAnchor.constraint(equalTo: c.bottomAnchor),
+            bodyContainer.centerXAnchor.constraint(equalTo: c.centerXAnchor),
+            bodyLead, bodyTrail,
+            bodyContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 760),
+
+            searchBar.topAnchor.constraint(equalTo: bodyContainer.topAnchor, constant: 4),
+            searchBar.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+            searchBar.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
             searchBar.heightAnchor.constraint(equalToConstant: 34),
 
             scope.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 6),
-            scope.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 8),
-            scope.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -8),
+            scope.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+            scope.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
             scope.heightAnchor.constraint(equalToConstant: 30),
 
             tableTopToToolbar,
-            tableView.leadingAnchor.constraint(equalTo: c.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: c.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: c.safeAreaLayoutGuide.bottomAnchor),
+            tableView.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: bodyContainer.safeAreaLayoutGuide.bottomAnchor),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: c.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: c.centerYAnchor, constant: 16),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: c.leadingAnchor, constant: 24),
-            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: c.trailingAnchor, constant: -24),
+            emptyLabel.centerXAnchor.constraint(equalTo: bodyContainer.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: bodyContainer.centerYAnchor, constant: 10),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: bodyContainer.leadingAnchor, constant: 24),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: bodyContainer.trailingAnchor, constant: -24),
 
-            noAccessView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            noAccessView.leadingAnchor.constraint(equalTo: c.leadingAnchor),
-            noAccessView.trailingAnchor.constraint(equalTo: c.trailingAnchor),
-            noAccessView.bottomAnchor.constraint(equalTo: c.bottomAnchor)
+            noAccessView.topAnchor.constraint(equalTo: bodyContainer.topAnchor),
+            noAccessView.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+            noAccessView.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
+            noAccessView.bottomAnchor.constraint(equalTo: bodyContainer.safeAreaLayoutGuide.bottomAnchor)
         ])
     }
 
@@ -268,9 +309,13 @@ final class KeyboardViewController: UIInputViewController {
         RuntimeEnvironment.shared.reportKeyboardHeartbeat(fullAccess: granted)
         noAccessView.isHidden = granted
         tableView.isHidden = !granted
-        toolbar.isUserInteractionEnabled = granted
+        searchButton.isEnabled = granted
         titleLabel.text = granted ? "剪贴历史" : "开启完全访问"
-        guard granted else { return }
+        guard granted else {
+            storedItems = []; transientItems = []; visibleItems = []
+            tableView.reloadData()
+            return
+        }
         _ = PasteboardSync.shared.performSync(sourceApp: "keyboard")
         reloadData()
     }
@@ -282,6 +327,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func reloadData() {
+        // 重开共享连接，确保拿到主 App 进程最新落盘数据
+        ClipStore.shared.reloadSync()
         storedItems = ClipStore.shared.fetchAll()
         // 兜底：共享库为空时把当前剪贴板作为临时条目，保证键盘里始终有可复制项
         transientItems = storedItems.isEmpty ? (currentPasteboardItem().map { [$0] } ?? []) : []
@@ -309,7 +356,7 @@ final class KeyboardViewController: UIInputViewController {
         tableView.reloadData()
     }
 
-    // MARK: - Actions
+    // MARK: - 工具按钮
 
     @objc private func toggleSearch() {
         let show = searchBar.isHidden
@@ -320,12 +367,15 @@ final class KeyboardViewController: UIInputViewController {
             self.tableTopToToolbar.isActive = !show
             self.tableTopToScope.isActive = show
             self.blurView.contentView.layoutIfNeeded()
-        } completion: { _ in
+        } completion: { [weak self] _ in
+            guard let self else { return }
             if !show {
                 self.searchBar.isHidden = true; self.scope.isHidden = true
                 self.searchBar.text = nil; self.keyword = ""
                 self.applyFilter()
-            } else { self.searchBar.becomeFirstResponder() }
+            } else {
+                self.searchBar.becomeFirstResponder()
+            }
         }
     }
 
@@ -377,7 +427,7 @@ final class KeyboardViewController: UIInputViewController {
         blurView.contentView.addSubview(t)
         NSLayoutConstraint.activate([
             t.centerXAnchor.constraint(equalTo: blurView.contentView.centerXAnchor),
-            t.bottomAnchor.constraint(equalTo: blurView.contentView.safeAreaLayoutGuide.bottomAnchor, constant: -14),
+            t.bottomAnchor.constraint(equalTo: blurView.contentView.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             t.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             t.heightAnchor.constraint(equalToConstant: 32)
         ])
@@ -389,7 +439,8 @@ final class KeyboardViewController: UIInputViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: w)
     }
 
-    /// 长按菜单：删除该条共享记录并刷新
+    // MARK: - 长按菜单动作
+
     private func deleteItem(_ item: ClipItem) {
         ClipStore.shared.delete(id: item.id)
         HapticHelper.warning()
@@ -397,30 +448,28 @@ final class KeyboardViewController: UIInputViewController {
         showToast("已删除")
     }
 
-    /// 长按菜单：跳转主 App 打开该条文本编辑（沿响应链 openURL，键盘扩展无 UIApplication.shared）
+    /// 仅长按菜单「在 App 中编辑」：沿响应链 openURL 跳转主 App
     private func openEditorInHostApp(id: UUID) {
         guard let url = URL(string: "clipboardhistory://edit/\(id.uuidString)") else { return }
+        performOpenURL(url)
+    }
+
+    /// 仅未授权遮罩使用：打开本 App 系统设置
+    private func openHostSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        performOpenURL(url)
+    }
+
+    /// 键盘扩展没有 UIApplication.shared，沿 responder 链找到能 openURL: 的对象
+    private func performOpenURL(_ url: URL) {
         let sel = NSSelectorFromString("openURL:")
-        var r: UIResponder? = self
-        while let cur = r {
+        var responder: UIResponder? = self
+        while let cur = responder {
             if cur.responds(to: sel) {
                 _ = cur.perform(sel, with: url)
                 return
             }
-            r = cur.next
-        }
-    }
-
-    /// 仅未授权遮罩使用：沿响应链打开本 App 系统设置
-    private func openHostSettings() {
-        let sel = NSSelectorFromString("openURL:")
-        var r: UIResponder? = self
-        while let cur = r {
-            if cur.responds(to: sel) {
-                _ = cur.perform(sel, with: URL(string: UIApplication.openSettingsURLString))
-                return
-            }
-            r = cur.next
+            responder = cur.next
         }
     }
 }
@@ -448,7 +497,6 @@ extension KeyboardViewController: UITableViewDataSource, UITableViewDelegate {
             let insert = UIAction(title: "复制并插入", image: UIImage(systemName: "text.cursor")) { _ in self?.copyAndInsert(item) }
             let copy = UIAction(title: "仅复制", image: UIImage(systemName: "doc.on.doc")) { _ in self?.copyOnly(item) }
             var children: [UIMenuElement] = [insert, copy]
-            // 仅文本且为已入库记录可跳主 App 编辑
             if isStored, item.text != nil {
                 let edit = UIAction(title: "在 App 中编辑", image: UIImage(systemName: "square.and.pencil")) { _ in
                     self?.openEditorInHostApp(id: item.id)
